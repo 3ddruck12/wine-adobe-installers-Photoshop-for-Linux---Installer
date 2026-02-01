@@ -1,4 +1,5 @@
 # Photoshop for Linux - Installer & AppImage
+**Unofficial community project**
 
 This project provides a modern, user-friendly GUI installer and a portable AppImage to run **Adobe Photoshop CC 2021** on Linux. It uses a specially patched version of Wine to fix common installer issues like broken dropdowns and XML errors.
 
