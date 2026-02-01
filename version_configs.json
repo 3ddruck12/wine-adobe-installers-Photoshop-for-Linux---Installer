@@ -1,0 +1,16 @@
+{
+  "cc2021": {
+    "display_name": "Adobe Photoshop CC 2021",
+    "wine_version": "fix-dropdowns",
+    "winetricks": ["msxml3", "mshtml", "vcruntimes", "atmlib", "gdiplus"],
+    "patches": ["js_xml_CDATA_fix", "ie9_emulation"],
+    "executable": "Photoshop.exe"
+  },
+  "cc2025": {
+    "display_name": "Adobe Photoshop CC 2025 (Experimental)",
+    "wine_version": "fix-dropdowns",
+    "winetricks": ["msxml3", "mshtml", "vcruntimes", "atmlib", "gdiplus", "webview2"],
+    "patches": ["js_xml_CDATA_fix", "ie9_emulation"],
+    "executable": "Photoshop.exe"
+  }
+}
