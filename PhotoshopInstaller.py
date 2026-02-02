@@ -259,7 +259,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         header_layout.addStretch()
         
         # Burger Menu
-        self.menu_btn = QPushButton("☰")
+        self.menu_btn = QPushButton("MENU")
         self.menu_btn.setFixedWidth(50)
         self.menu_btn.setObjectName("menuBtn")
         self.menu_btn.setToolTip("Menu")
@@ -425,21 +425,21 @@ class PhotoshopInstallerGUI(QMainWindow):
         text = "<b>System Requirements Tracking:</b><br><br>"
         all_ok = True
         for name, installed in results.items():
-            icon = "✅" if installed else "❌"
+            icon = "[OK]" if installed else "[MISSING]"
             if not installed: all_ok = False
             text += f"{icon} {name}<br>"
         
         self.dep_label.setText(text)
         if all_ok:
             self.install_btn.setEnabled(True)
-            self.dep_label.setText(text + "<br><font color='#4caf50'>Alle Abhängigkeiten erfüllt!</font>")
+            self.dep_label.setText(text + "<br><font color='#4caf50'>All dependencies satisfied!</font>")
         else:
             self.dep_label.setText(text + "<br><font color='#f44336'>Bitte fehlende Pakete nachinstallieren.</font>")
 
     def run_photoshop_installer(self):
         installer_path = self.installer_path_edit.text()
         if not installer_path or installer_path == "No file selected...":
-            self.log_output.append("<font color='#f44336'>Kein Installer ausgewählt!</font>")
+            self.log_output.append("<font color='#f44336'>No installer selected!</font>")
             return
             
         prefix_path = str(Path.home() / ".photoshop_cc2021")
@@ -551,7 +551,7 @@ Categories=Graphics;
     def open_winecfg(self):
         prefix_path = str(Path.home() / ".photoshop_cc2021")
         wine_path = "/home/jens/Dokumente/Software Projekte/Photoshop AppImage/wine-adobe-installers-fix-dropdowns/wine"
-        self.log_output.append("Öffne winecfg...")
+        self.log_output.append("Opening winecfg...")
         env = os.environ.copy()
         env["WINEPREFIX"] = prefix_path
         threading.Thread(target=lambda: subprocess.run([wine_path, "winecfg"], env=env)).start()
@@ -579,7 +579,7 @@ Categories=Graphics;
         env = os.environ.copy()
         env["WINEPREFIX"] = prefix_path
 
-        self.log_output.append("<b>Wende Photoshop-Stabilitäts-Fixes an...</b>")
+        self.log_output.append("<b>Applying Photoshop stability fixes...</b>")
         
         fixes = [
             ("atmlib", "native"),
@@ -589,7 +589,7 @@ Categories=Graphics;
         
         try:
             for dll, mode in fixes:
-                self.log_output.append(f"Setze Override für {dll} ({mode})...")
+                self.log_output.append(f"Setting override for {dll} ({mode})...")
                 subprocess.check_call([wine_path, "reg", "add", "HKEY_CURRENT_USER\\Software\\Wine\\AppDefaults\\Photoshop.exe\\DllOverrides", "/v", dll, "/t", "REG_SZ", "/d", mode, "/f"], env=env)
             
             # Disable Home Screen (Registry)
@@ -625,11 +625,11 @@ Categories=Graphics;
     def clean_prefix(self):
         prefix_path = Path.home() / ".photoshop_cc2021"
         if prefix_path.exists():
-            self.log_output.append(f"Lösche Wine-Prefix unter {prefix_path}...")
+            self.log_output.append(f"Deleting Wine prefix at {prefix_path}...")
             shutil.rmtree(prefix_path)
-            self.log_output.append("Prefix gelöscht.")
+            self.log_output.append("Prefix deleted.")
         else:
-            self.log_output.append("Prefix existiert nicht.")
+            self.log_output.append("Prefix does not exist.")
 
     def save_log(self):
         file_path, _ = QFileDialog.getSaveFileName(
