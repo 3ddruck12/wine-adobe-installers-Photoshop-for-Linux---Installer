@@ -64,8 +64,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QFrame, QProgressBar, QScrollArea, QSizePolicy,
     QTextEdit, QGroupBox, QFileDialog, QLineEdit, QMessageBox, QMenu
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QPixmap
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
+from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QPixmap, QScreen
 
 class DependencyChecker(QThread):
     status_signal = pyqtSignal(dict)
@@ -226,7 +226,35 @@ class PhotoshopInstallerGUI(QMainWindow):
             QPushButton:disabled {
                 background-color: #1a1a1a;
                 color: #555555;
-                border-color: #333333;
+                border: 1px solid #333333;
+            }
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #333333;
+                border-radius: 8px;
+                margin-top: 15px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #888888;
+            }
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #1a1a1a;
+                width: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #333333;
+                min-height: 20px;
+                border-radius: 5px;
             }
             QProgressBar {
                 border: none;
@@ -284,8 +312,16 @@ class PhotoshopInstallerGUI(QMainWindow):
         # Content Split (Controls Left + Status Right)
         content_layout = QHBoxLayout()
         
-        # LEFT Side: Controls (1/3 weight)
-        control_side = QVBoxLayout()
+        # LEFT Side: Controls (1/3 weight) - Wrapped in ScrollArea
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        
+        self.control_container = QWidget()
+        self.scroll_area.setWidget(self.control_container)
+        control_side = QVBoxLayout(self.control_container)
+        control_side.setContentsMargins(0, 0, 10, 0)
         control_side.setSpacing(10)
         
         # Group 1: Quick Start
@@ -387,7 +423,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         control_side.addWidget(maint_group)
         
         control_side.addStretch()
-        content_layout.addLayout(control_side, 1)
+        content_layout.addWidget(self.scroll_area, 1)
 
         # RIGHT Side: Status & Log (2/3 weight)
         status_side = QVBoxLayout()
@@ -744,6 +780,10 @@ Categories=Graphics;
         QTimer.singleShot(5000, self.check_dependencies)
 
 if __name__ == "__main__":
+    # Force High-DPI Scaling for modern displays
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"
+    
     # Check for --launch flag
     if "--launch" in sys.argv:
         # Dummy app for path resolution if needed
