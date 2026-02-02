@@ -259,7 +259,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         header_layout.addStretch()
         
         # Burger Menu
-        self.menu_btn = QPushButton("MENU")
+        self.menu_btn = QPushButton("\u2630")
         self.menu_btn.setFixedWidth(50)
         self.menu_btn.setObjectName("menuBtn")
         self.menu_btn.setToolTip("Menu")
