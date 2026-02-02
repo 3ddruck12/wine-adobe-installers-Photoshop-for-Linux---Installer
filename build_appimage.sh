@@ -1,16 +1,29 @@
 #!/bin/bash
-# build_appimage.sh - Professional AppImage creation with linuxdeploy
+# build_appimage.sh - Enhanced AppImage creation with Standalone Python
 
 set -e
 
 APP_DIR="Photoshop.AppDir"
 PROJECT_DIR=$(pwd)
 WINE_SOURCE="wine-adobe-installers-fix-dropdowns"
+PYTHON_TAR="python-standalone.tar.gz"
+
+if [ ! -f "$PYTHON_TAR" ]; then
+    echo "ERROR: $PYTHON_TAR not found! Download it first."
+    exit 1
+fi
 
 echo "Cleanup old AppDir..."
 rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/usr/bin"
+mkdir -p "$APP_DIR/usr"
 mkdir -p "$APP_DIR/opt/photoshop-installer"
+
+echo "Extracting Standalone Python..."
+tar -xf "$PYTHON_TAR" -C "$APP_DIR/usr/"
+
+echo "Installing PyQt6 into bundled Python..."
+# Use the bundled python to install its own dependencies
+"$APP_DIR/usr/python/bin/python3" -m pip install PyQt6 --quiet
 
 echo "Copying project files..."
 cp PhotoshopInstaller.py "$APP_DIR/opt/photoshop-installer/"
@@ -18,31 +31,18 @@ cp version_configs.json "$APP_DIR/opt/photoshop-installer/"
 cp pstux_icon.png "$APP_DIR/opt/photoshop-installer/"
 cp -r "$WINE_SOURCE" "$APP_DIR/opt/photoshop-installer/"
 
-echo "Bundling Virtual Environment..."
-# Ensure PyQt6 is in the host venv so linuxdeploy can find its libs
-source venv/bin/activate
-pip install PyQt6 --quiet
-
-# Copy venv to AppDir
-cp -r venv "$APP_DIR/opt/photoshop-installer/"
-
-# Dynamically find the python version in the venv
-PY_VER=$(basename $(find "$APP_DIR/opt/photoshop-installer/venv/lib" -name "python3.*" -type d | head -n 1))
-SITE_PACKAGES="\$HERE/opt/photoshop-installer/venv/lib/$PY_VER/site-packages"
-
 echo "Creating AppRun..."
 cat <<EOF > "$APP_DIR/AppRun"
 #!/bin/bash
 HERE="\$(dirname "\$(readlink -f "\${0}")")"
-export PATH="\$HERE/opt/photoshop-installer/venv/bin:\$PATH"
-# Add site-packages to PYTHONPATH explicitly because moved venv breaks resolution
-export PYTHONPATH="\$HERE/opt/photoshop-installer:$SITE_PACKAGES:\$PYTHONPATH"
-export LD_LIBRARY_PATH="\$HERE/usr/lib:$SITE_PACKAGES/PyQt6/Qt6/lib:\$LD_LIBRARY_PATH"
-export QT_PLUGIN_PATH="$SITE_PACKAGES/PyQt6/Qt6/plugins"
+export PYTHONHOME="\$HERE/usr/python"
+export PATH="\$HERE/usr/python/bin:\$PATH"
+export PYTHONPATH="\$HERE/opt/photoshop-installer:\$PYTHONPATH"
+export LD_LIBRARY_PATH="\$HERE/usr/lib:\$HERE/usr/python/lib:\$LD_LIBRARY_PATH"
 
-# Run the installer
+# Run the installer using the bundled Python
 cd "\$HERE/opt/photoshop-installer"
-./venv/bin/python3 PhotoshopInstaller.py "\$@"
+"\$HERE/usr/python/bin/python3" PhotoshopInstaller.py "\$@"
 EOF
 chmod +x "$APP_DIR/AppRun"
 
@@ -60,9 +60,9 @@ cp pstux_icon.png "$APP_DIR/photoshop.png"
 # linuxdeploy requires standard resolutions
 mogrify -resize 512x512 "$APP_DIR/photoshop.png" || true
 
-echo "Using linuxdeploy to bundle shared libraries (including Qt6)..."
-# Force linuxdeploy to include PyQt6's bundled Qt libraries, libfuse2, and their system dependencies
-PYQT_LIBS=$(find "$APP_DIR/opt/photoshop-installer/venv" -name "libQt6*.so.6" -printf "--library %p ")
+echo "Using linuxdeploy to bundle shared libraries..."
+# We don't need to manually find PyQt6 libs anymore as they are in the bundled python's site-packages
+# and linuxdeploy will find them via the executable.
 FUSE_LIB=$(find /lib /usr/lib -name "libfuse.so.2" | head -n 1)
 
 EXTRA_LIBS=""
@@ -72,8 +72,7 @@ if [ -n "$FUSE_LIB" ]; then
 fi
 
 ./linuxdeploy --appdir "$APP_DIR" \
-    --executable "$APP_DIR/opt/photoshop-installer/venv/bin/python3" \
-    $PYQT_LIBS \
+    --executable "$APP_DIR/usr/python/bin/python3" \
     $EXTRA_LIBS \
     --desktop-file "$APP_DIR/photoshop.desktop" \
     --icon-file "$APP_DIR/photoshop.png"
@@ -82,4 +81,4 @@ echo "Generating AppImage..."
 export ARCH=x86_64
 ./appimagetool "$APP_DIR" Photoshop_Installer_x86_64.AppImage
 
-echo "SUCCESS: Standalone AppImage created!"
+echo "SUCCESS: Standalone AppImage created with bundled Python!"
