@@ -42,7 +42,14 @@ Inspired by the [Affinity on Linux](https://github.com/Wanaty/Affinity-Installer
 ### Option 2: Running from Source
 
 1. Clone the repository.
-2. Create a virtual environment and install dependencies:
+2. Install dependencies via your package manager (recommended for Debian/Ubuntu) or venv:
+   
+   **Debian 13 / Ubuntu (Fixes PEP 668 pip error):**
+   ```bash
+   sudo apt update && sudo apt install python3-pyqt6 -y
+   ```
+
+   **Generic (Virtual Environment):**
    ```bash
    python3 -m venv venv
    source venv/bin/activate

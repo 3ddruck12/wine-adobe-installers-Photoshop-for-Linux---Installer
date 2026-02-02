@@ -721,7 +721,7 @@ Categories=Graphics;
         distro = detect_distro()
         self.log_output.append(f"Distro detected: {distro}")
         
-        pkgs = ["gcc", "flex", "bison", "make", "git", "libx11-dev"]
+        pkgs = ["gcc", "flex", "bison", "make", "git", "libx11-dev", "python3-pyqt6"]
         if distro in ["ubuntu", "debian", "pop", "mint"]:
             cmd = f"pkexec apt update && pkexec apt install -y {' '.join(pkgs)}"
         elif distro in ["arch", "manjaro"]:
