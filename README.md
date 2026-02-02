@@ -34,7 +34,11 @@ Inspired by the [Affinity on Linux](https://github.com/Wanaty/Affinity-Installer
    ```bash
    chmod +x Photoshop_Installer_x86_64.AppImage
    ```
-3. Run it:
+3. **Ubuntu 22.04+ / 25.10 Users**: Install `libfuse2` first:
+   ```bash
+   sudo apt update && sudo apt install libfuse2
+   ```
+4. Run it:
    ```bash
    ./Photoshop_Installer_x86_64.AppImage
    ```
@@ -74,6 +78,35 @@ Inspired by the [Affinity on Linux](https://github.com/Wanaty/Affinity-Installer
 | | `Deep Repair` | Cleans Adobe cache files without erasing Wine. |
 | | `Save Installation Log` | Exports logs for troubleshooting. |
 | | `Delete Wine Prefix` | Full reset (deletes all data). |
+
+## 🐛 Troubleshooting
+
+### AppImage does nothing when double-clicked (Ubuntu 22.04+)
+
+**Symptom**: No error message, AppImage simply doesn't start.
+
+**Cause**: Ubuntu 22.04+ and newer (including 25.10) removed `libfuse2` by default.
+
+**Solution**:
+```bash
+sudo apt update && sudo apt install libfuse2
+```
+
+### "Permission denied" error
+
+**Solution**:
+```bash
+chmod +x Photoshop_Installer_x86_64.AppImage
+```
+
+### AppImage won't run in a VM
+
+Some VMs have restricted kernel capabilities. Try:
+1. Install `libfuse2` (see above)
+2. Run from terminal to see error messages:
+   ```bash
+   ./Photoshop_Installer_x86_64.AppImage
+   ```
 
 ## 🏗️ Development & Building
 

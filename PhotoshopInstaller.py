@@ -49,8 +49,14 @@ def install_package(package_name, import_name=None):
             return False
 
 # Initialize PyQt6
-if not install_package("PyQt6", "PyQt6"):
-    print("Critical: PyQt6 is required but could not be installed.")
+try:
+    import PyQt6
+    from PyQt6.QtWidgets import QApplication
+except ImportError as e:
+    print("CRITICAL ERROR: Failed to import PyQt6!")
+    print(f"Error details: {e}")
+    print(f"sys.path: {sys.path}")
+    print("Running in AppImage? This usually means PYTHONPATH is missing site-packages.")
     sys.exit(1)
 
 from PyQt6.QtWidgets import (

@@ -26,14 +26,19 @@ pip install PyQt6 --quiet
 # Copy venv to AppDir
 cp -r venv "$APP_DIR/opt/photoshop-installer/"
 
+# Dynamically find the python version in the venv
+PY_VER=$(basename $(find "$APP_DIR/opt/photoshop-installer/venv/lib" -name "python3.*" -type d | head -n 1))
+SITE_PACKAGES="\$HERE/opt/photoshop-installer/venv/lib/$PY_VER/site-packages"
+
 echo "Creating AppRun..."
 cat <<EOF > "$APP_DIR/AppRun"
 #!/bin/bash
 HERE="\$(dirname "\$(readlink -f "\${0}")")"
 export PATH="\$HERE/opt/photoshop-installer/venv/bin:\$PATH"
-export PYTHONPATH="\$HERE/opt/photoshop-installer:\$PYTHONPATH"
-export LD_LIBRARY_PATH="\$HERE/usr/lib:\$HERE/opt/photoshop-installer/venv/lib/python3.12/site-packages/PyQt6/Qt6/lib:\$LD_LIBRARY_PATH"
-export QT_PLUGIN_PATH="\$HERE/opt/photoshop-installer/venv/lib/python3.12/site-packages/PyQt6/Qt6/plugins"
+# Add site-packages to PYTHONPATH explicitly because moved venv breaks resolution
+export PYTHONPATH="\$HERE/opt/photoshop-installer:$SITE_PACKAGES:\$PYTHONPATH"
+export LD_LIBRARY_PATH="\$HERE/usr/lib:$SITE_PACKAGES/PyQt6/Qt6/lib:\$LD_LIBRARY_PATH"
+export QT_PLUGIN_PATH="$SITE_PACKAGES/PyQt6/Qt6/plugins"
 
 # Run the installer
 cd "\$HERE/opt/photoshop-installer"
