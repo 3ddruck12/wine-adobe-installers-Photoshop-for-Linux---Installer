@@ -721,11 +721,13 @@ Categories=Graphics;
         distro = detect_distro()
         self.log_output.append(f"Distro detected: {distro}")
         
-        pkgs = ["gcc", "flex", "bison", "make", "git", "libx11-dev", "python3-pyqt6"]
+        pkgs_debian = ["gcc", "flex", "bison", "make", "git", "libx11-dev", "python3-pyqt6"]
+        pkgs_arch = ["base-devel", "git", "libx11", "python-pyqt6", "winetricks"]
+
         if distro in ["ubuntu", "debian", "pop", "mint"]:
-            cmd = f"pkexec apt update && pkexec apt install -y {' '.join(pkgs)}"
+            cmd = f"pkexec apt update && pkexec apt install -y {' '.join(pkgs_debian)}"
         elif distro in ["arch", "manjaro"]:
-            cmd = f"pkexec pacman -S --noconfirm {' '.join(pkgs)}"
+            cmd = f"pkexec pacman -S --noconfirm {' '.join(pkgs_arch)}"
         else:
             self.log_output.append("Manual installation required for this distribution.")
             return
