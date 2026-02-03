@@ -17,47 +17,109 @@ import time
 def detect_distro():
     """Detect distribution for package installation"""
     try:
-        with open("/etc/os-release", "r") as f:
-            content = f.read()
-        for line in content.split("\n"):
-            if line.startswith("ID="):
-                distro = line.split("=", 1)[1].strip().strip('"').lower()
-                return distro
-    except (IOError, FileNotFoundError):
+        if os.path.exists("/etc/os-release"):
+            with open("/etc/os-release", "r") as f:
+                lines = f.readlines()
+            info = {}
+            for line in lines:
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    info[key.strip()] = value.strip().strip('"')
+            
+            distro = info.get("ID", "unknown").lower()
+            # Handle derivatives
+            if distro in ["ubuntu", "debian", "pop", "mint", "kali", "trixie", "sid"]:
+                return "debian"
+            if distro in ["arch", "manjaro", "cachyos", "endeavouros"]:
+                return "arch"
+            if distro in ["fedora", "nobara", "redhat", "centos", "rocky", "alma"]:
+                return "fedora"
+            if distro in ["opensuse", "opensuse-leap", "opensuse-tumbleweed", "suse"]:
+                return "suse"
+            return distro
+    except Exception:
         pass
     return "unknown"
 
-def install_package(package_name, import_name=None):
-    """Install a Python package if not available"""
+def install_package(package_name, import_name=None, system_pkg=None):
+    """Install a Python package if not available, trying system manager first for critical ones"""
     if import_name is None:
         import_name = package_name
+    
     try:
         __import__(import_name)
         return True
     except ImportError:
-        print(f"Installing {package_name}...")
+        print(f"Package {package_name} is missing. Attempting installation...")
         distro = detect_distro()
+        
+        # Mapping of common python packages to system packages
+        sys_map = {
+            "PyQt6": {
+                "debian": "python3-pyqt6",
+                "arch": "python-pyqt6",
+                "fedora": "python3-pyqt6",
+                "suse": "python3-qt6"
+            }
+        }
+        
+        target_sys_pkg = system_pkg or sys_map.get(package_name, {}).get(distro)
+        
+        if target_sys_pkg:
+            print(f"Trying to install system package: {target_sys_pkg}")
+            cmd = ""
+            if distro == "debian":
+                cmd = f"pkexec apt update && pkexec apt install -y {target_sys_pkg} libxcb-cursor0"
+            elif distro == "arch":
+                cmd = f"pkexec pacman -S --noconfirm {target_sys_pkg}"
+            elif distro == "fedora":
+                cmd = f"pkexec dnf install -y {target_sys_pkg}"
+            elif distro == "suse":
+                cmd = f"pkexec zypper install -y {target_sys_pkg}"
+            
+            if cmd:
+                try:
+                    subprocess.check_call(cmd, shell=True)
+                    return True
+                except Exception as e:
+                    print(f"System installation failed: {e}")
+
+        # Fallback to pip
+        print(f"Falling back to pip installation for {package_name}...")
         pip_flags = ["--user"]
-        if distro in ["arch", "cachyos", "manjaro", "endeavouros"]:
+        
+        # Check if we need --break-system-packages (PEP 668)
+        # Usually indicated by the presence of EXTERNALLY-MANAGED file in python lib dir
+        is_managed = False
+        import glob
+        if glob.glob("/usr/lib/python3*/EXTERNALLY-MANAGED"):
+            is_managed = True
+        
+        if is_managed:
             pip_flags.append("--break-system-packages")
         
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", package_name] + pip_flags)
             return True
         except Exception as e:
-            print(f"Failed to install {package_name}: {e}")
+            # Check if pip itself is missing
+            if "No module named pip" in str(e) or subprocess.call([sys.executable, "-m", "pip", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+                print("Error: 'pip' is not installed. Please install 'python3-pip' first.")
+            print(f"Failed to install {package_name} via pip: {e}")
             return False
 
 # Initialize PyQt6
-try:
-    import PyQt6
-    from PyQt6.QtWidgets import QApplication
-except ImportError as e:
-    print("CRITICAL ERROR: Failed to import PyQt6!")
-    print(f"Error details: {e}")
-    print(f"sys.path: {sys.path}")
-    print("Running in AppImage? This usually means PYTHONPATH is missing site-packages.")
+if not install_package("PyQt6"):
+    print("\n" + "="*50)
+    print("CRITICAL ERROR: Failed to install or import PyQt6!")
+    print("Please install it manually:")
+    print("Debian/Ubuntu: sudo apt install python3-pyqt6 libxcb-cursor0")
+    print("Arch Linux:     sudo pacman -S python-pyqt6")
+    print("Fedora:         sudo dnf install python3-pyqt6")
+    print("="*50 + "\n")
     sys.exit(1)
+
+from PyQt6.QtWidgets import QApplication
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -763,13 +825,19 @@ Categories=Graphics;
         distro = detect_distro()
         self.log_output.append(f"Distro detected: {distro}")
         
-        pkgs_debian = ["gcc", "flex", "bison", "make", "git", "libx11-dev", "python3-pyqt6"]
+        pkgs_debian = ["gcc", "flex", "bison", "make", "git", "libx11-dev", "python3-pyqt6", "libxcb-cursor0"]
         pkgs_arch = ["base-devel", "git", "libx11", "python-pyqt6", "winetricks"]
+        pkgs_fedora = ["gcc", "flex", "bison", "make", "git", "libX11-devel", "python3-pyqt6", "winetricks"]
+        pkgs_suse = ["gcc", "flex", "bison", "make", "git", "libX11-devel", "python3-qt6", "winetricks"]
 
-        if distro in ["ubuntu", "debian", "pop", "mint"]:
+        if distro == "debian":
             cmd = f"pkexec apt update && pkexec apt install -y {' '.join(pkgs_debian)}"
-        elif distro in ["arch", "manjaro"]:
+        elif distro == "arch":
             cmd = f"pkexec pacman -S --noconfirm {' '.join(pkgs_arch)}"
+        elif distro == "fedora":
+            cmd = f"pkexec dnf install -y {' '.join(pkgs_fedora)}"
+        elif distro == "suse":
+            cmd = f"pkexec zypper install -y {' '.join(pkgs_suse)}"
         else:
             self.log_output.append("Manual installation required for this distribution.")
             return

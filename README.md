@@ -22,7 +22,9 @@ Inspired by the [Affinity on Linux](https://github.com/Wanaty/Affinity-Installer
 
 ### Linux Distributions (Auto-Detection)
 - **Debian-based**: Ubuntu, Debian, Pop!_OS, Linux Mint
-- **Arch-based**: Arch Linux, Manjaro
+- **Arch-based**: Arch Linux, Manjaro, CachyOS
+- **Fedora**: Fedora 43+
+- **OpenSUSE**: Tumbleweed, Leap
 - *Other distributions require manual dependency installation.*
 
 ## 🛠️ Installation & Usage
