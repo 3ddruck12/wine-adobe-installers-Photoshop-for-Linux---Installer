@@ -156,10 +156,29 @@ class WineBuildThread(QThread):
     def __init__(self, source_path):
         super().__init__()
         self.source_path = source_path
+        self.build_path = None
+
+    def set_build_dir(self, path):
+        self.build_path = path
 
     def run(self):
         try:
-            os.chdir(self.source_path)
+            work_dir = self.source_path
+            
+            # If a build path is set (writable location), copy sources there
+            if self.build_path:
+                self.log_signal.emit(f"Preparing build directory: {self.build_path}")
+                if os.path.exists(self.build_path):
+                    try:
+                        shutil.rmtree(self.build_path)
+                    except Exception as e:
+                        self.log_signal.emit(f"Warning: Could not clean old build dir: {e}")
+                
+                self.log_signal.emit("Copying source files to writable location...")
+                shutil.copytree(self.source_path, self.build_path)
+                work_dir = self.build_path
+            
+            os.chdir(work_dir)
             self.log_signal.emit("Configuring Wine...")
             # Simple check for autogen.sh
             if os.path.exists("autogen.sh"):
@@ -217,12 +236,24 @@ class WineEnvironmentThread(QThread):
 def get_base_dir():
     """Get the base directory of the script or the AppImage"""
     if getattr(sys, 'frozen', False):
-        # Running in a bundle (e.g., via linuxdeploy/AppImage)
-        # In AppImage, the script is usually in opt/photoshop-installer/
         return os.path.dirname(os.path.abspath(__file__))
     else:
-        # Running in normal python environment
         return os.path.dirname(os.path.abspath(__file__))
+
+def get_writable_wine_dir():
+    """Get a valid, writable directory for the Wine binary"""
+    # Prefer the writable user location if it exists (meaning we built it there)
+    user_dir = Path.home() / ".local" / "share" / "photoshop-installer" / "wine-src"
+    
+    # Check if the user build exists and has the wine binary
+    user_wine = user_dir / "wine"
+    if user_wine.exists() and os.access(user_wine, os.X_OK):
+        return str(user_wine)
+        
+    # Fallback/Default check (mostly for local dev env)
+    local_dev_wine = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
+    return local_dev_wine
+
 
 class PhotoshopInstallerGUI(QMainWindow):
     def __init__(self):
@@ -374,7 +405,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.app_menu.addAction("Help / Information", self.show_help)
         self.app_menu.addAction("Export Log", self.save_log)
         self.app_menu.addSeparator()
-        self.app_menu.addAction("About", lambda: QMessageBox.about(self, "About", "Photoshop for Linux v2.0\nCreated for Adobe Photoshop on Linux."))
+        self.app_menu.addAction("About", lambda: QMessageBox.about(self, "About", "Photoshop for Linux v2.1-alpha\nCreated for Adobe Photoshop on Linux."))
         
         self.menu_btn.setMenu(self.app_menu)
         header_layout.addWidget(self.menu_btn)
@@ -557,7 +588,7 @@ class PhotoshopInstallerGUI(QMainWindow):
             return
             
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
+        wine_path = get_writable_wine_dir()
         
         self.log_output.append(f"Starte Installer aus: {installer_path}")
         env = os.environ.copy()
@@ -574,7 +605,7 @@ class PhotoshopInstallerGUI(QMainWindow):
     def launch_photoshop(self):
         # Path logic for installed Photoshop usually in C:\Program Files\Adobe\Adobe Photoshop 2021\Photoshop.exe
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
+        wine_path = get_writable_wine_dir()
         
         ps_exe = Path(prefix_path) / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2021" / "Photoshop.exe"
         
@@ -664,7 +695,7 @@ Categories=Graphics;
 
     def open_winecfg(self):
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
+        wine_path = get_writable_wine_dir()
         self.log_output.append("Opening winecfg...")
         env = os.environ.copy()
         env["WINEPREFIX"] = prefix_path
@@ -689,7 +720,7 @@ Categories=Graphics;
 
     def apply_ps_fixes(self):
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
+        wine_path = get_writable_wine_dir()
         env = os.environ.copy()
         env["WINEPREFIX"] = prefix_path
 
@@ -798,7 +829,7 @@ Categories=Graphics;
             return
 
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
+        wine_path = get_writable_wine_dir()
         
         if not os.path.exists(wine_path):
             self.log_output.append("<font color='#f44336'>Wine has not been compiled yet. Please run 'One-Click Full Setup' first.</font>")
@@ -815,10 +846,17 @@ Categories=Graphics;
         self.install_btn.setEnabled(False)
         self.progress_bar.setValue(5)
         
-        # Determine source path
-        source_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns")
+        # Determine source path (READ-ONLY in AppImage)
+        ro_source_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns")
         
-        self.build_thread = WineBuildThread(source_path)
+        # Determine destination path (WRITABLE user directory)
+        dest_path = str(Path.home() / ".local" / "share" / "photoshop-installer" / "wine-src")
+        
+        self.log_output.append(f"Source: {ro_source_path}")
+        self.log_output.append(f"Build Dir: {dest_path}")
+        
+        self.build_thread = WineBuildThread(ro_source_path)
+        self.build_thread.set_build_dir(dest_path) # Pass the writable location
         self.build_thread.log_signal.connect(self.log_output.append)
         self.build_thread.progress_signal.connect(self.progress_bar.setValue)
         self.build_thread.finished_signal.connect(self.on_installation_finished)
