@@ -374,7 +374,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.app_menu.addAction("Help / Information", self.show_help)
         self.app_menu.addAction("Export Log", self.save_log)
         self.app_menu.addSeparator()
-        self.app_menu.addAction("About", lambda: QMessageBox.about(self, "About", "Photoshop for Linux v1.0\nCreated for Adobe Photoshop on Linux."))
+        self.app_menu.addAction("About", lambda: QMessageBox.about(self, "About", "Photoshop for Linux v2.0\nCreated for Adobe Photoshop on Linux."))
         
         self.menu_btn.setMenu(self.app_menu)
         header_layout.addWidget(self.menu_btn)
