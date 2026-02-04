@@ -214,6 +214,16 @@ class WineEnvironmentThread(QThread):
             self.log_signal.emit(f"Error during environment setup: {e}")
             self.finished_signal.emit(False)
 
+def get_base_dir():
+    """Get the base directory of the script or the AppImage"""
+    if getattr(sys, 'frozen', False):
+        # Running in a bundle (e.g., via linuxdeploy/AppImage)
+        # In AppImage, the script is usually in opt/photoshop-installer/
+        return os.path.dirname(os.path.abspath(__file__))
+    else:
+        # Running in normal python environment
+        return os.path.dirname(os.path.abspath(__file__))
+
 class PhotoshopInstallerGUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -343,7 +353,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         header_layout = QHBoxLayout()
         
         self.logo_label = QLabel()
-        icon_path = os.path.join(os.path.dirname(__file__), "pstux_icon.png")
+        icon_path = os.path.join(get_base_dir(), "pstux_icon.png")
         if os.path.exists(icon_path):
             pixmap = QPixmap(icon_path)
             self.logo_label.setPixmap(pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
@@ -547,7 +557,7 @@ class PhotoshopInstallerGUI(QMainWindow):
             return
             
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = "/home/jens/Dokumente/Software Projekte/Photoshop AppImage/wine-adobe-installers-fix-dropdowns/wine"
+        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
         
         self.log_output.append(f"Starte Installer aus: {installer_path}")
         env = os.environ.copy()
@@ -564,7 +574,7 @@ class PhotoshopInstallerGUI(QMainWindow):
     def launch_photoshop(self):
         # Path logic for installed Photoshop usually in C:\Program Files\Adobe\Adobe Photoshop 2021\Photoshop.exe
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = "/home/jens/Dokumente/Software Projekte/Photoshop AppImage/wine-adobe-installers-fix-dropdowns/wine"
+        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
         
         ps_exe = Path(prefix_path) / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2021" / "Photoshop.exe"
         
@@ -593,7 +603,7 @@ class PhotoshopInstallerGUI(QMainWindow):
             icon_dir.mkdir(parents=True, exist_ok=True)
             
             # 1. Handle Icon
-            src_icon = os.path.join(os.path.dirname(__file__), "pstux_icon.png")
+            src_icon = os.path.join(get_base_dir(), "pstux_icon.png")
             dest_icon = icon_dir / "pstux_photoshop_final.png"
             if os.path.exists(src_icon):
                 shutil.copy(src_icon, dest_icon)
@@ -654,7 +664,7 @@ Categories=Graphics;
 
     def open_winecfg(self):
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = "/home/jens/Dokumente/Software Projekte/Photoshop AppImage/wine-adobe-installers-fix-dropdowns/wine"
+        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
         self.log_output.append("Opening winecfg...")
         env = os.environ.copy()
         env["WINEPREFIX"] = prefix_path
@@ -679,7 +689,7 @@ Categories=Graphics;
 
     def apply_ps_fixes(self):
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = "/home/jens/Dokumente/Software Projekte/Photoshop AppImage/wine-adobe-installers-fix-dropdowns/wine"
+        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
         env = os.environ.copy()
         env["WINEPREFIX"] = prefix_path
 
@@ -714,7 +724,7 @@ Categories=Graphics;
             
         self.log_output.append("<b>Starting Deep Repair...</b>")
         paths_to_clean = [
-            prefix_path / "drive_c" / "users" / os.getlogin() / "AppData" / "Local" / "Adobe" / "OOBE",
+            prefix_path / "drive_c" / "users" / os.environ.get("USER", "wineuser") / "AppData" / "Local" / "Adobe" / "OOBE",
             prefix_path / "drive_c" / "Program Files (x86)" / "Common Files" / "Adobe" / "SLCache",
             prefix_path / "drive_c" / "ProgramData" / "Adobe" / "SLStore"
         ]
@@ -780,14 +790,15 @@ Categories=Graphics;
         
         # Load config
         try:
-            with open("version_configs.json", "r") as f:
+            config_path = os.path.join(get_base_dir(), "version_configs.json")
+            with open(config_path, "r") as f:
                 config = json.load(f)["cc2021"]
         except Exception as e:
             self.log_output.append(f"Error loading configuration: {e}")
             return
 
         prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = "/home/jens/Dokumente/Software Projekte/Photoshop AppImage/wine-adobe-installers-fix-dropdowns/wine"
+        wine_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
         
         if not os.path.exists(wine_path):
             self.log_output.append("<font color='#f44336'>Wine has not been compiled yet. Please run 'One-Click Full Setup' first.</font>")
@@ -805,7 +816,7 @@ Categories=Graphics;
         self.progress_bar.setValue(5)
         
         # Determine source path
-        source_path = "/home/jens/Dokumente/Software Projekte/Photoshop AppImage/wine-adobe-installers-fix-dropdowns"
+        source_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns")
         
         self.build_thread = WineBuildThread(source_path)
         self.build_thread.log_signal.connect(self.log_output.append)
