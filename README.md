@@ -132,4 +132,4 @@ To build the AppImage yourself:
 - **The Linux Community**: For continuous improvements to Wine and AppImage tools.
 
 ---
-*Disclaimer: This project is not affiliated with Adobe Inc. Adobe Photoshop is a registered trademark of Adobe Inc.*
+*Disclaimer: This project is not affiliated with Adobe Inc. Adobe Photoshop is a registered trademark of Adobe Inc. You must have a valid original license from Adobe to use this software. This project strictly provides a compatibility layer (using Wine) and scripts to facilitate the installation of the legitimate software on Linux. It does not contain any Adobe software files, cracks, or means to bypass copy protection.*
