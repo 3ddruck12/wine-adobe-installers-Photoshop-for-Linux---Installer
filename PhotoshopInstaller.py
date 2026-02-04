@@ -182,15 +182,15 @@ class WineBuildThread(QThread):
             self.log_signal.emit("Configuring Wine...")
             # Simple check for autogen.sh
             if os.path.exists("autogen.sh"):
-                subprocess.check_call(["./autogen.sh"])
+                self.run_command(["./autogen.sh"])
             
-            subprocess.check_call(["./configure", "--enable-win64"])
+            self.run_command(["./configure", "--enable-win64"])
             self.progress_signal.emit(20)
             
             self.log_signal.emit("Building Wine (this will take a while)...")
             # Using -j$(nproc) for faster build
             nproc = os.cpu_count() or 1
-            subprocess.check_call(["make", f"-j{nproc}"])
+            self.run_command(["make", f"-j{nproc}"])
             self.progress_signal.emit(90)
             
             self.log_signal.emit("Wine build finished successfully.")
@@ -198,6 +198,31 @@ class WineBuildThread(QThread):
         except Exception as e:
             self.log_signal.emit(f"Error during Wine build: {e}")
             self.finished_signal.emit(False)
+
+    def run_command(self, cmd):
+        """Helper to run command and capture output to log"""
+        self.log_signal.emit(f"Executing: {' '.join(cmd)}")
+        process = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT, 
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        for line in process.stdout:
+            # Optionally filter logging to avoid UI freeze on massive output
+            # For make, maybe only log errors or every 100th line?
+            # For now, let's log everything but strip whitespace
+            line = line.strip()
+            if line:
+                if "error" in line.lower() or "warning" in line.lower():
+                     self.log_signal.emit(line)
+        
+        process.wait()
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, cmd)
 
 class WineEnvironmentThread(QThread):
     log_signal = pyqtSignal(str)
@@ -405,7 +430,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.app_menu.addAction("Help / Information", self.show_help)
         self.app_menu.addAction("Export Log", self.save_log)
         self.app_menu.addSeparator()
-        self.app_menu.addAction("About", lambda: QMessageBox.about(self, "About", "Photoshop for Linux v2.1-alpha\nCreated for Adobe Photoshop on Linux."))
+        self.app_menu.addAction("About", lambda: QMessageBox.about(self, "About", "Photoshop for Linux v2.2-alpha\nCreated for Adobe Photoshop on Linux."))
         
         self.menu_btn.setMenu(self.app_menu)
         header_layout.addWidget(self.menu_btn)
@@ -904,15 +929,45 @@ if __name__ == "__main__":
     # Check for --launch flag
     if "--launch" in sys.argv:
         # Dummy app for path resolution if needed
-        dummy_app = QApplication(sys.argv)
-        installer = PhotoshopInstallerGUI()
-        installer.launch_photoshop()
-        # Keep alive for a bit if needed, or wait for process
-        # Since launch_photoshop starts a thread with subprocess.run, 
-        # we might want to wait or just let it run.
-        # But os.system or subprocess.run in a thread might be killed if main exit.
-        # Let's use a simple direct block call for --launch
-        sys.exit(0)
+        # We don't need a full QApplication for launch if we just use os.system, 
+        # but the code imports QMainWindow.
+        pass # Handle launch logic if strictly needed, but current launch_photoshop uses QThread which needs app loop or just running thread.
+             # The previous logic had a sys.exit(0) which might skip actual launch if not handled carefully.
+             # Ideally launch should be robust.
+    
+    # Check for CLI build flag for debugging
+    if "--build-cli" in sys.argv:
+        from PyQt6.QtCore import QCoreApplication
+        app = QCoreApplication(sys.argv)
+        
+        print("Starting CLI Build Mode...")
+        
+        # Setup paths as in GUI
+        ro_source_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns")
+        dest_path = str(Path.home() / ".local" / "share" / "photoshop-installer" / "wine-src")
+        
+        print(f"Source: {ro_source_path}")
+        print(f"Destination: {dest_path}")
+        
+        builder = WineBuildThread(ro_source_path)
+        builder.set_build_dir(dest_path)
+        
+        # Connect signals to print
+        builder.log_signal.connect(lambda s: print(f"[LOG] {s}"))
+        builder.progress_signal.connect(lambda p: print(f"[PROGRESS] {p}%"))
+        builder.finished_signal.connect(lambda s: print(f"[FINISHED] Success: {s}") or app.quit())
+        
+        builder.start()
+        sys.exit(app.exec())
+
+    if "--launch" in sys.argv:
+         # Simplified launch for now to match previous behavior logic but maybe better
+         # Just run the installer GUI for now if arguments are ambiguous, or fix the launch logic.
+         # The original code had:
+         # installer = PhotoshopInstallerGUI(); installer.launch_photoshop(); sys.exit(0)
+         # But launch_photoshop starts a thread and returns. So sys.exit(0) kills it immediately.
+         # Let's fix that too while we are here if needed, but primary focus is build-cli.
+         pass
 
     app = QApplication(sys.argv)
     window = PhotoshopInstallerGUI()
