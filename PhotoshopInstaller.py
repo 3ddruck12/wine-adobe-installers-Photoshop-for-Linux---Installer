@@ -188,8 +188,8 @@ class WineBuildThread(QThread):
             self.progress_signal.emit(20)
             
             self.log_signal.emit("Building Wine (this will take a while)...")
-            # Using -j$(nproc) for faster build
-            nproc = os.cpu_count() or 1
+            # Using -j$(nproc) for faster build, but limit to 4 to avoid OOM on some systems
+            nproc = min(os.cpu_count() or 1, 4)
             self.run_command(["make", f"-j{nproc}"])
             self.progress_signal.emit(90)
             
