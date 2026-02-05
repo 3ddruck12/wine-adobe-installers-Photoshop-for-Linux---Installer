@@ -17,9 +17,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse2 ImageMagick build-essential gcc-mingw-w64 g++-mingw-w64 \
+          sudo apt-get install -y libfuse2 imagemagick build-essential gcc-mingw-w64 g++-mingw-w64 \
             libx11-dev libfreetype6-dev libdbus-1-dev libgnutls28-dev libpng-dev libjpeg-dev \
-            libtiff-dev libxml2-dev libxslt1-dev libsdl2-dev libosmesa6-dev libhal-storage-dev \
+            libtiff-dev libxml2-dev libxslt1-dev libsdl2-dev libosmesa6-dev \
             libv4l-dev libgphoto2-dev liblcms2-dev libpulse-dev libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev libudev-dev libcapi20-dev libopenal-dev \
             libasound2-dev libfontconfig1-dev libkrb5-dev
