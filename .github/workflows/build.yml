@@ -44,8 +44,8 @@ jobs:
           # Use extracted tools
           export PATH=$(pwd)/linuxdeploy-extracted/usr/bin:$(pwd)/appimagetool-extracted/usr/bin:$PATH
           # Link them to match build_appimage.sh
-          ln -s linuxdeploy-extracted/AppRun linuxdeploy
-          ln -s appimagetool-extracted/AppRun appimagetool
+          ln -sf linuxdeploy-extracted/AppRun linuxdeploy
+          ln -sf appimagetool-extracted/AppRun appimagetool
           ./build_appimage.sh
 
       - name: Release
