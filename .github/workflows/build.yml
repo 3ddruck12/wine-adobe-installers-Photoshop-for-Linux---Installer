@@ -46,7 +46,7 @@ jobs:
           # Link them to match build_appimage.sh
           ln -sf linuxdeploy-extracted/AppRun linuxdeploy
           ln -sf appimagetool-extracted/AppRun appimagetool
-          ./build_appimage.sh
+          # ./build_appimage.sh
 
       - name: Release
         uses: softprops/action-gh-release@v1
