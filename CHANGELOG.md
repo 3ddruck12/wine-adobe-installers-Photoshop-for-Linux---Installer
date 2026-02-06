@@ -1,6 +1,15 @@
-# Changelog – Photoshop AppImage v3.0
+# Changelog – Photoshop AppImage
 
-## Überblick
+## v3.01-alpha (2026-02-06)
+
+### Bugfixes
+- **UTF-8 Encoding-Crash behoben:** Wine gibt beim Starten von .exe-Dateien Nicht-UTF-8-Bytes aus (z.B. Windows-1252 `0x81`). Alle `subprocess.run()` Aufrufe verwenden jetzt `encoding="utf-8", errors="replace"` statt striktem Decoding. Betroffene Stellen: `wineboot --init`, `winetricks`-Komponenten, Installer-Runner, Vulkan-Backend-Switch.
+
+---
+
+## v3.0 (2026-01-xx)
+
+### Überblick
 
 Kompletter Rewrite des Projekts: Wine 11.1 als vorkompiliertes Bundle, kein Build beim User mehr, GUI auf Englisch, 25+ Bugs behoben.
 

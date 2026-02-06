@@ -198,7 +198,8 @@ class WineSetupThread(QThread):
             result = subprocess.run(
                 [self.wine_path, "wineboot", "--init"],
                 env=env,
-                capture_output=True, text=True, timeout=120,
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=120,
             )
             if result.returncode != 0:
                 self.log_signal.emit(f"wineboot stderr: {result.stderr[:500]}")
@@ -212,7 +213,8 @@ class WineSetupThread(QThread):
                     try:
                         subprocess.run(
                             ["winetricks", "-q", comp],
-                            env=env, capture_output=True, text=True, timeout=300,
+                            env=env, capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=300,
                         )
                     except subprocess.TimeoutExpired:
                         self.log_signal.emit(f"Warning: {comp} timed out, continuing...")
@@ -247,6 +249,7 @@ class InstallerRunnerThread(QThread):
             proc = subprocess.run(
                 [self.wine_path, self.exe_path],
                 env=env, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
             )
             if proc.returncode != 0:
                 self.log_signal.emit(f"Installer exited with code {proc.returncode}")
@@ -381,7 +384,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         app_menu.addSeparator()
         app_menu.addAction("About", lambda: QMessageBox.about(
             self, "About",
-            "Photoshop for Linux v3.0\n"
+            "Photoshop for Linux v3.01-alpha\n"
             "Wine 11.1 · Pre-compiled build\n"
             "Community project – not affiliated with Adobe."
         ))
@@ -842,7 +845,8 @@ class PhotoshopInstallerGUI(QMainWindow):
         try:
             subprocess.run(
                 ["winetricks", "renderer=vulkan"], env=env,
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=30,
             )
             self.log_ok("Vulkan backend activated.")
         except Exception as e:
