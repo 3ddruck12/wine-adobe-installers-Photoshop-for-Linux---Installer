@@ -98,6 +98,15 @@ python3 PhotoshopInstaller.py
 | | `Run Selected Installer` | Run the selected `.exe` inside the Wine prefix. |
 | | `Launch Photoshop` | Start an already-installed Photoshop (auto-detects `Photoshop.exe`). |
 | | `Add to Start Menu` | Creates a `.desktop` file for your application launcher. |
+
+---
+
+## 📄 License
+
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)**.  
+The use of **PyQt6** in this project is compliant with its GPL license.
+
+See the [LICENSE](LICENSE) file for more details.
 | **System Setup** | `Install System Packages` | Installs `winetricks` via your distro's package manager. |
 | | `Install Winetricks Components` | Installs MSXML, VCRuntimes, fonts, gdiplus, atmlib. |
 | **Maintenance** | `Open Wine Configuration` | Opens `winecfg` for the Photoshop prefix. |
