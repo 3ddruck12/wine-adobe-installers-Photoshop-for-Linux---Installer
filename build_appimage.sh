@@ -54,6 +54,17 @@ for tool in gcc flex bison make; do
     fi
 done
 
+# MinGW cross-compilers are required for WoW64 (32-bit) support
+for cross in i686-w64-mingw32-gcc x86_64-w64-mingw32-gcc; do
+    if ! command -v "$cross" &>/dev/null; then
+        echo "ERROR: '$cross' is required for WoW64 support."
+        echo "  Debian/Ubuntu:  sudo apt install mingw-w64"
+        echo "  Arch:           sudo pacman -S mingw-w64-gcc"
+        echo "  Fedora:         sudo dnf install mingw64-gcc mingw32-gcc"
+        exit 1
+    fi
+done
+
 # ── Step 1: Compile Wine 11.1 (cached) ────────────────────────────────────
 
 if [ -f "$WINE_BUILD_DIR/wine" ]; then
@@ -73,7 +84,7 @@ else
         cd "$WINE_BUILD_BASE/build"
 
         "$WINE_BUILD_BASE/src/configure" \
-            --enable-win64 \
+            --enable-archs=x86_64,i386 \
             --disable-tests \
             --prefix="$WINE_BUILD_BASE/install"
 
@@ -162,8 +173,8 @@ export PATH="$HERE/usr/python/bin:$HERE/usr/bin:$PATH"
 export PYTHONPATH="$HERE/opt/photoshop-installer:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="$HERE/usr/lib:$HERE/usr/lib64:$HERE/usr/python/lib:${LD_LIBRARY_PATH:-}"
 
-# Wine environment
-export WINEDLLPATH="$HERE/usr/lib64/wine/x86_64-unix:$HERE/usr/lib/wine/x86_64-unix:${WINEDLLPATH:-}"
+# Wine environment (64-bit + 32-bit WoW64)
+export WINEDLLPATH="$HERE/usr/lib64/wine/x86_64-unix:$HERE/usr/lib/wine/x86_64-unix:$HERE/usr/lib64/wine/i386-unix:$HERE/usr/lib/wine/i386-unix:${WINEDLLPATH:-}"
 
 cd "$HERE/opt/photoshop-installer"
 exec "$HERE/usr/python/bin/python3" PhotoshopInstaller.py "$@"

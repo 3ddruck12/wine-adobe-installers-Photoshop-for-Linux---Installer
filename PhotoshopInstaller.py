@@ -219,12 +219,18 @@ class WineSetupThread(QThread):
         if os.path.isfile(wineserver):
             env["WINESERVER"] = wineserver
 
-        # Point to bundled Wine libs if inside AppImage
+        # Point to bundled Wine libs if inside AppImage (64-bit + 32-bit WoW64)
         appdir = os.environ.get("APPDIR")
         if appdir:
-            lib64 = os.path.join(appdir, "usr", "lib64", "wine")
-            lib32 = os.path.join(appdir, "usr", "lib", "wine")
-            extra = ":".join(filter(os.path.isdir, [lib64, lib32]))
+            dll_dirs = [
+                os.path.join(appdir, "usr", "lib64", "wine", "x86_64-unix"),
+                os.path.join(appdir, "usr", "lib", "wine", "x86_64-unix"),
+                os.path.join(appdir, "usr", "lib64", "wine", "i386-unix"),
+                os.path.join(appdir, "usr", "lib", "wine", "i386-unix"),
+                os.path.join(appdir, "usr", "lib64", "wine"),
+                os.path.join(appdir, "usr", "lib", "wine"),
+            ]
+            extra = ":".join(filter(os.path.isdir, dll_dirs))
             if extra:
                 env["WINEDLLPATH"] = extra + ":" + env.get("WINEDLLPATH", "")
 
