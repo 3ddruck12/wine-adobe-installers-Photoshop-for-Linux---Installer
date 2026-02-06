@@ -25,6 +25,7 @@ import subprocess
 import shutil
 import threading
 import json
+import re
 from pathlib import Path
 import time
 
@@ -156,6 +157,33 @@ def detect_distro():
     return "unknown"
 
 
+def detect_gpus():
+    """Detect installed GPUs via lspci."""
+    gpus = []
+    try:
+        result = subprocess.run(
+            ["lspci"], capture_output=True, text=True, timeout=10
+        )
+        for line in result.stdout.splitlines():
+            if any(k in line for k in ("VGA", "3D controller", "Display controller")):
+                entry = {"raw": line.strip()}
+                lower = line.lower()
+                if "nvidia" in lower:
+                    entry["vendor"] = "NVIDIA"
+                elif "amd" in lower or "ati" in lower or "radeon" in lower:
+                    entry["vendor"] = "AMD"
+                elif "intel" in lower:
+                    entry["vendor"] = "Intel"
+                else:
+                    entry["vendor"] = "Unknown"
+                parts = line.split(": ", 1)
+                entry["name"] = parts[1].strip() if len(parts) > 1 else line.strip()
+                gpus.append(entry)
+    except Exception:
+        pass
+    return gpus
+
+
 # ---------------------------------------------------------------------------
 # Attempt to import / install PyQt6
 # ---------------------------------------------------------------------------
@@ -197,6 +225,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFrame, QProgressBar, QScrollArea,
     QTextEdit, QGroupBox, QFileDialog, QLineEdit, QMessageBox, QMenu,
+    QSlider, QDialog, QDialogButtonBox, QRadioButton, QButtonGroup,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
 from PyQt6.QtGui import QIcon, QPixmap, QDesktopServices
@@ -588,6 +617,20 @@ class PhotoshopInstallerGUI(QMainWindow):
         btn_repair.clicked.connect(self.deep_repair)
         mt_l.addWidget(btn_repair)
 
+        btn_reset = QPushButton("\u26a0 Full Environment Reset")
+        btn_reset.setToolTip(
+            "Kill ALL Wine processes, remove lock files, and optionally\n"
+            "delete the prefix. Use after a failed/cancelled installation."
+        )
+        btn_reset.setStyleSheet(
+            "QPushButton { background-color: #e65100; color: white; "
+            "border: 1px solid #e65100; border-radius: 8px; "
+            "padding: 10px 20px; font-weight: bold; }"
+            "QPushButton:hover { background-color: #ff6d00; }"
+        )
+        btn_reset.clicked.connect(self.full_environment_reset)
+        mt_l.addWidget(btn_reset)
+
         btn_log = QPushButton("Save Installation Log")
         btn_log.clicked.connect(self.save_log)
         mt_l.addWidget(btn_log)
@@ -597,6 +640,22 @@ class PhotoshopInstallerGUI(QMainWindow):
         btn_nuke.clicked.connect(self.clean_prefix)
         mt_l.addWidget(btn_nuke)
         ctrl.addWidget(mt)
+
+        # Advanced Settings
+        adv = QGroupBox("Advanced Settings")
+        adv_l = QVBoxLayout(adv)
+
+        btn_dpi = QPushButton("Configure DPI Scaling")
+        btn_dpi.setToolTip("Adjust DPI for HiDPI monitors (96\u2013480)")
+        btn_dpi.clicked.connect(self.configure_dpi)
+        adv_l.addWidget(btn_dpi)
+
+        btn_gpu_info = QPushButton("Detect GPU && Recommend Settings")
+        btn_gpu_info.setToolTip("Auto-detect your GPU and suggest optimal settings")
+        btn_gpu_info.clicked.connect(self.detect_and_recommend_gpu)
+        adv_l.addWidget(btn_gpu_info)
+
+        ctrl.addWidget(adv)
 
         ctrl.addStretch()
         body.addWidget(scroll, 1)
@@ -611,6 +670,30 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.dep_label.setWordWrap(True)
         card_l.addWidget(self.dep_label)
 
+        # Installation Status Dashboard
+        self.status_frame = QFrame()
+        self.status_frame.setStyleSheet(
+            "QFrame { background-color: #2a2a2a; border: 1px solid #444; "
+            "border-radius: 8px; padding: 10px; margin: 5px 0; }"
+        )
+        status_inner = QVBoxLayout(self.status_frame)
+        status_inner.setSpacing(4)
+        dash_title = QLabel("<b>\U0001f4ca Installation Status</b>")
+        dash_title.setStyleSheet("border: none; color: #4ec9b0;")
+        status_inner.addWidget(dash_title)
+        self.status_label = QLabel("Checking...")
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("border: none; color: #ccc; font-size: 12px;")
+        status_inner.addWidget(self.status_label)
+        btn_refresh = QPushButton("\u21bb Refresh")
+        btn_refresh.setFixedWidth(80)
+        btn_refresh.setStyleSheet(
+            "QPushButton { font-size: 11px; padding: 3px 8px; }"
+        )
+        btn_refresh.clicked.connect(self._refresh_status)
+        status_inner.addWidget(btn_refresh)
+        card_l.addWidget(self.status_frame)
+
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setStyleSheet(
@@ -622,8 +705,21 @@ class PhotoshopInstallerGUI(QMainWindow):
 
         pbar_frame = QFrame()
         pbar_l = QVBoxLayout(pbar_frame)
+        pbar_top = QHBoxLayout()
         self.progress_label = QLabel("Ready")
-        pbar_l.addWidget(self.progress_label)
+        pbar_top.addWidget(self.progress_label)
+        pbar_top.addStretch()
+        self.cancel_btn = QPushButton("\u2715 Cancel")
+        self.cancel_btn.setStyleSheet(
+            "QPushButton { background-color: #c62828; color: white; border: none; "
+            "border-radius: 4px; padding: 4px 12px; font-size: 11px; }"
+            "QPushButton:hover { background-color: #e53935; }"
+        )
+        self.cancel_btn.setFixedHeight(24)
+        self.cancel_btn.clicked.connect(self._cancel_operation)
+        self.cancel_btn.hide()
+        pbar_top.addWidget(self.cancel_btn)
+        pbar_l.addLayout(pbar_top)
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         pbar_l.addWidget(self.progress_bar)
@@ -657,8 +753,121 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.tricks_btn.setEnabled(not busy)
         if busy:
             self.progress_label.setText(label)
+            self.cancel_btn.show()
         else:
             self.progress_label.setText("Ready")
+            self.cancel_btn.hide()
+            self._active_thread = None
+
+    def _kill_all_wine_processes(self):
+        """Forcefully kill ALL Wine-related processes and clean up locks."""
+        killed = []
+
+        # Step 1: graceful wineserver shutdown
+        wineserver = get_wine_server()
+        if wineserver:
+            try:
+                subprocess.run(
+                    [wineserver, "-k"], timeout=5, capture_output=True
+                )
+                killed.append("wineserver (graceful)")
+            except Exception:
+                pass
+
+        # Step 2: forcefully kill wineserver if still running
+        if wineserver:
+            try:
+                subprocess.run(
+                    [wineserver, "-k9"], timeout=5, capture_output=True
+                )
+            except Exception:
+                pass
+
+        # Step 3: kill all Wine-related processes by name
+        wine_procs = [
+            "wine", "wine64", "wine-preloader", "wine64-preloader",
+            "wineserver", "wineboot", "winedbg", "winetricks",
+            "msiexec.exe", "services.exe", "plugplay.exe",
+            "svchost.exe", "rpcss.exe", "explorer.exe",
+        ]
+        for proc_name in wine_procs:
+            try:
+                result = subprocess.run(
+                    ["pkill", "-9", "-f", proc_name],
+                    capture_output=True, timeout=3,
+                )
+                if result.returncode == 0:
+                    killed.append(proc_name)
+            except Exception:
+                pass
+
+        # Step 4: clean lock files from the prefix
+        prefix = Path(get_prefix_path())
+        locks_cleaned = 0
+        if prefix.exists():
+            # Remove .lck files
+            for lck in prefix.rglob("*.lck"):
+                try:
+                    lck.unlink()
+                    locks_cleaned += 1
+                except Exception:
+                    pass
+            # Remove wineserver socket directory
+            server_dir = prefix / ".wineserver"
+            if server_dir.exists():
+                shutil.rmtree(server_dir, ignore_errors=True)
+                locks_cleaned += 1
+            # Remove /tmp wineserver sockets for this prefix
+            try:
+                import glob
+                for sock in glob.glob("/tmp/.wine-*"):
+                    if os.path.isdir(sock):
+                        shutil.rmtree(sock, ignore_errors=True)
+                        locks_cleaned += 1
+            except Exception:
+                pass
+
+        return killed, locks_cleaned
+
+    def _cancel_operation(self):
+        """Cancel the currently running background operation."""
+        if self._active_thread and self._active_thread.isRunning():
+            reply = QMessageBox.question(
+                self, "Cancel Operation",
+                "Are you sure you want to cancel the current operation?\n\n"
+                "This will:\n"
+                "\u2022 Terminate the running task\n"
+                "\u2022 Kill ALL Wine processes\n"
+                "\u2022 Remove lock files\n\n"
+                "You can use 'Full Environment Reset' afterwards if needed.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.log("<font color='#ff9800'>\u26a0 Cancelling operation...</font>")
+
+                # Terminate the thread
+                self._active_thread.terminate()
+                self._active_thread.wait(3000)
+
+                # Kill all wine processes and clean locks
+                killed, locks = self._kill_all_wine_processes()
+
+                if killed:
+                    self.log(f"<font color='#ff9800'>  Killed processes: {', '.join(killed)}</font>")
+                if locks > 0:
+                    self.log(f"<font color='#ff9800'>  Removed {locks} lock file(s)</font>")
+
+                self._set_busy(False)
+                self.progress_bar.setValue(0)
+                self.log(
+                    "<font color='#ff9800'>Operation cancelled. "
+                    "Environment cleaned up.</font>"
+                )
+                self.log(
+                    "<font color='#888'>Tip: Use 'Full Environment Reset' if you "
+                    "still have issues, or 'One-Click Setup' to rebuild.</font>"
+                )
+                self._refresh_status()
 
     # ── Dependency check ──────────────────────────────────────────────
 
@@ -687,6 +896,45 @@ class PhotoshopInstallerGUI(QMainWindow):
             self.setup_btn.setEnabled(False)
 
         self.dep_label.setText("".join(lines))
+        self._refresh_status()
+
+    def _refresh_status(self):
+        """Update the installation status dashboard."""
+        lines = []
+
+        wine = get_wine_binary()
+        if wine:
+            try:
+                result = subprocess.run(
+                    [wine, "--version"], capture_output=True, text=True, timeout=5
+                )
+                lines.append(f"\U0001f377 Wine: {result.stdout.strip()}")
+            except Exception:
+                lines.append("\U0001f377 Wine: installed")
+        else:
+            lines.append("\U0001f377 Wine: \u274c not found")
+
+        ps = self._find_photoshop_exe()
+        if ps:
+            ps_dir = os.path.basename(os.path.dirname(ps))
+            lines.append(f"\U0001f3a8 Photoshop: \u2705 {ps_dir}")
+        else:
+            lines.append("\U0001f3a8 Photoshop: \u274c not installed")
+
+        prefix = Path(get_prefix_path())
+        if prefix.exists():
+            lines.append("\U0001f4c1 Prefix: \u2705 exists")
+        else:
+            lines.append("\U0001f4c1 Prefix: \u274c not created")
+
+        gpus = detect_gpus()
+        if gpus:
+            for gpu in gpus:
+                lines.append(f"\U0001f3ae {gpu['vendor']}: {gpu['name']}")
+        else:
+            lines.append("\U0001f3ae GPU: not detected")
+
+        self.status_label.setText("<br>".join(lines))
 
     # ── One-Click Setup ───────────────────────────────────────────────
 
@@ -710,6 +958,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         self._setup_thread.log_signal.connect(self.log)
         self._setup_thread.progress_signal.connect(self.progress_bar.setValue)
         self._setup_thread.finished_signal.connect(self._on_setup_finished)
+        self._active_thread = self._setup_thread
         self._setup_thread.start()
 
     def _on_setup_finished(self, success):
@@ -719,6 +968,7 @@ class PhotoshopInstallerGUI(QMainWindow):
             self.log_ok("<b>Setup completed!</b> You can now run the Photoshop installer.")
         else:
             self.log_err("<b>Setup failed.</b> Check the log above for details.")
+        self._refresh_status()
 
     # ── Installer execution ───────────────────────────────────────────
 
@@ -746,6 +996,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         self._runner = InstallerRunnerThread(wine, get_prefix_path(), exe)
         self._runner.log_signal.connect(self.log)
         self._runner.finished_signal.connect(self._on_installer_finished)
+        self._active_thread = self._runner
         self._runner.start()
 
     def _on_installer_finished(self, success):
@@ -754,6 +1005,7 @@ class PhotoshopInstallerGUI(QMainWindow):
             self.log_ok("Installer finished. Try 'Launch Photoshop'.")
         else:
             self.log_err("Installer process reported an error.")
+        self._refresh_status()
 
     # ── Launch Photoshop ──────────────────────────────────────────────
 
@@ -925,6 +1177,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         self._wt_thread.log_signal.connect(self.log)
         self._wt_thread.progress_signal.connect(self.progress_bar.setValue)
         self._wt_thread.finished_signal.connect(self._on_setup_finished)
+        self._active_thread = self._wt_thread
         self._wt_thread.start()
 
     # ── Wine Config ───────────────────────────────────────────────────
@@ -941,40 +1194,288 @@ class PhotoshopInstallerGUI(QMainWindow):
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
+    # ── DPI Scaling ───────────────────────────────────────────────────
+
+    def configure_dpi(self):
+        """Open a dialog to configure Wine DPI scaling."""
+        wine = get_wine_binary()
+        if not wine:
+            self.log_err("Wine binary not found!")
+            return
+
+        prefix = Path(get_prefix_path())
+        if not prefix.exists():
+            self.log_err("Wine prefix doesn't exist. Run One-Click Setup first.")
+            return
+
+        current_dpi = 96
+        env = self._wine_env()
+        try:
+            result = subprocess.run(
+                [wine, "reg", "query",
+                 r"HKCU\Control Panel\Desktop", "/v", "LogPixels"],
+                env=env, capture_output=True, text=True, timeout=15,
+            )
+            for line in result.stdout.splitlines():
+                if "LogPixels" in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 3:
+                        current_dpi = int(parts[-1], 16)
+                    break
+        except Exception:
+            pass
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("DPI Scaling Configuration")
+        dialog.setMinimumWidth(420)
+        dlg_layout = QVBoxLayout(dialog)
+
+        info = QLabel(
+            "<b>Adjust DPI for HiDPI displays</b><br>"
+            "Higher values make UI elements larger in Photoshop.<br>"
+            "Default: 96 DPI (100%)"
+        )
+        info.setWordWrap(True)
+        dlg_layout.addWidget(info)
+
+        val_label = QLabel(
+            f"{current_dpi} DPI ({round(current_dpi / 96 * 100)}%)"
+        )
+        val_label.setStyleSheet(
+            "font-size: 18px; font-weight: bold; color: #4ec9b0;"
+        )
+        val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dlg_layout.addWidget(val_label)
+
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setMinimum(96)
+        slider.setMaximum(480)
+        slider.setSingleStep(12)
+        slider.setValue(current_dpi)
+        slider.valueChanged.connect(
+            lambda v: val_label.setText(f"{v} DPI ({round(v / 96 * 100)}%)")
+        )
+        dlg_layout.addWidget(slider)
+
+        preset_row = QHBoxLayout()
+        for plabel, pval in [
+            ("100%", 96), ("125%", 120), ("150%", 144),
+            ("200%", 192), ("300%", 288),
+        ]:
+            pbtn = QPushButton(plabel)
+            pbtn.setFixedWidth(60)
+            pbtn.clicked.connect(lambda checked, v=pval: slider.setValue(v))
+            preset_row.addWidget(pbtn)
+        dlg_layout.addLayout(preset_row)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        dlg_layout.addWidget(btn_box)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_dpi = slider.value()
+            self.log(f"Setting DPI to {new_dpi} ({round(new_dpi / 96 * 100)}%)...")
+            try:
+                subprocess.run(
+                    [wine, "reg", "add", r"HKCU\Control Panel\Desktop",
+                     "/v", "LogPixels", "/t", "REG_DWORD",
+                     "/d", str(new_dpi), "/f"],
+                    env=env, capture_output=True, timeout=15,
+                )
+                subprocess.run(
+                    [wine, "reg", "add", r"HKCU\Software\Wine\Fonts",
+                     "/v", "LogPixels", "/t", "REG_DWORD",
+                     "/d", str(new_dpi), "/f"],
+                    env=env, capture_output=True, timeout=15,
+                )
+                self.log_ok(
+                    f"DPI set to {new_dpi}. "
+                    "Restart Photoshop for changes to take effect."
+                )
+                self._refresh_status()
+            except Exception as e:
+                self.log_err(f"Failed to set DPI: {e}")
+
     # ── GPU Backend ───────────────────────────────────────────────────
 
     def switch_gpu_backend(self):
-        if not shutil.which("winetricks"):
-            self.log_err("winetricks not found. Install it first.")
+        wine = get_wine_binary()
+        if not wine:
+            self.log_err("Wine binary not found!")
             return
+
+        prefix = Path(get_prefix_path())
+        if not prefix.exists():
+            self.log_err("Wine prefix doesn't exist. Run One-Click Setup first.")
+            return
+
         env = self._wine_env()
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Switch GPU Backend")
-        msg.setText("Choose the GPU backend for Wine rendering.")
-        btn_vulkan = msg.addButton("Vulkan (DXVK)", QMessageBox.ButtonRole.AcceptRole)
-        btn_gl = msg.addButton("OpenGL (wined3d)", QMessageBox.ButtonRole.DestructiveRole)
-        msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-        msg.exec()
 
-        clicked = msg.clickedButton()
-        if clicked is None or clicked.text() == "Cancel":
+        dialog = QDialog(self)
+        dialog.setWindowTitle("GPU Backend & Renderer")
+        dialog.setMinimumWidth(450)
+        layout = QVBoxLayout(dialog)
+
+        info = QLabel(
+            "<b>Choose the rendering backend:</b><br>"
+            "This affects performance and feature support for Photoshop."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        group = QButtonGroup(dialog)
+
+        rb_dxvk = QRadioButton(
+            "DXVK (Vulkan) \u2014 Best performance, recommended for most GPUs"
+        )
+        rb_dxvk.setChecked(True)
+        group.addButton(rb_dxvk)
+        layout.addWidget(rb_dxvk)
+
+        rb_vkd3d = QRadioButton(
+            "vkd3d-proton (Vulkan + OpenCL) \u2014 For PS filters & Neural Filters"
+        )
+        group.addButton(rb_vkd3d)
+        layout.addWidget(rb_vkd3d)
+
+        rb_gl = QRadioButton(
+            "OpenGL (wined3d) \u2014 Most compatible, slower"
+        )
+        group.addButton(rb_gl)
+        layout.addWidget(rb_gl)
+
+        rb_gdi = QRadioButton(
+            "GDI (Software) \u2014 Fallback if GPU drivers have issues"
+        )
+        group.addButton(rb_gdi)
+        layout.addWidget(rb_gdi)
+
+        gpus = detect_gpus()
+        if gpus:
+            hint = "<br>".join(f"Detected: <b>{g['name']}</b>" for g in gpus)
+            gpu_label = QLabel(hint)
+            gpu_label.setStyleSheet("color: #4ec9b0; margin-top: 8px;")
+            gpu_label.setWordWrap(True)
+            layout.addWidget(gpu_label)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        if clicked == btn_gl:
-            self.log("Setting renderer to OpenGL (wined3d)...")
-            cmd = ["winetricks", "renderer=gl"]
+        selected = group.checkedButton()
+
+        if selected == rb_dxvk:
+            self.log("Setting renderer to <b>Vulkan (DXVK)</b>...")
+            renderer = "vulkan"
+        elif selected == rb_vkd3d:
+            self.log("Setting renderer to <b>Vulkan (vkd3d-proton)</b>...")
+            renderer = "vulkan"
+            if shutil.which("winetricks"):
+                self.log("Installing vkd3d-proton via winetricks...")
+                try:
+                    subprocess.run(
+                        ["winetricks", "-q", "vkd3d"],
+                        env=env, capture_output=True, text=True, timeout=120,
+                    )
+                    self.log_ok("vkd3d-proton installed.")
+                except subprocess.TimeoutExpired:
+                    self.log_err("vkd3d-proton install timed out.")
+                except Exception as e:
+                    self.log_err(f"vkd3d-proton install failed: {e}")
+            else:
+                self.log_err(
+                    "winetricks not found \u2013 cannot install vkd3d-proton. "
+                    "Install winetricks first."
+                )
+        elif selected == rb_gl:
+            self.log("Setting renderer to <b>OpenGL (wined3d)</b>...")
+            renderer = "gl"
+        elif selected == rb_gdi:
+            self.log("Setting renderer to <b>GDI (Software)</b>...")
+            renderer = "gdi"
         else:
-            self.log("Setting renderer to Vulkan (DXVK)...")
-            cmd = ["winetricks", "renderer=vulkan"]
+            return
+
         try:
             subprocess.run(
-                cmd, env=env,
-                capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=30,
+                [wine, "reg", "add", r"HKCU\Software\Wine\Direct3D",
+                 "/v", "renderer", "/t", "REG_SZ", "/d", renderer, "/f"],
+                env=env, capture_output=True, timeout=15,
             )
-            self.log_ok("GPU backend updated.")
+            self.log_ok(
+                "GPU backend updated. Restart Photoshop for changes to take effect."
+            )
+            self._refresh_status()
         except Exception as e:
             self.log_err(f"Failed to switch backend: {e}")
+
+    # ── GPU Detection ─────────────────────────────────────────────────
+
+    def detect_and_recommend_gpu(self):
+        """Detect GPU hardware and show optimal settings recommendations."""
+        gpus = detect_gpus()
+        if not gpus:
+            self.log_err("No GPU detected. Is 'lspci' available?")
+            QMessageBox.warning(
+                self, "GPU Detection",
+                "No GPU could be detected.\n"
+                "Make sure 'pciutils' (lspci) is installed.",
+            )
+            return
+
+        msg = "<b>\U0001f3ae Detected GPUs:</b><br><br>"
+        recommendations = []
+
+        for gpu in gpus:
+            vendor = gpu["vendor"]
+            name = gpu["name"]
+            msg += f"\u2022 <b>{name}</b><br>"
+
+            if vendor == "NVIDIA":
+                recommendations.append(
+                    "<b>NVIDIA GPU:</b><br>"
+                    "\u2022 Recommended: <b>DXVK</b> (Vulkan) for best performance<br>"
+                    "\u2022 Use vkd3d-proton for DX12 / OpenCL (Neural Filters)<br>"
+                    "\u2022 Make sure proprietary NVIDIA drivers are installed<br>"
+                    "\u2022 Tip: set <code>__GL_SHADER_DISK_CACHE=1</code>"
+                )
+            elif vendor == "AMD":
+                recommendations.append(
+                    "<b>AMD GPU:</b><br>"
+                    "\u2022 Recommended: <b>DXVK</b> (Vulkan) with RADV driver<br>"
+                    "\u2022 vkd3d-proton works well for DX12 / OpenCL<br>"
+                    "\u2022 Mesa RADV is usually pre-installed on most distros<br>"
+                    "\u2022 Tip: set <code>RADV_PERFTEST=gpl</code>"
+                )
+            elif vendor == "Intel":
+                recommendations.append(
+                    "<b>Intel GPU:</b><br>"
+                    "\u2022 Recommended: <b>OpenGL</b> for best compatibility<br>"
+                    "\u2022 Vulkan/DXVK may work on newer Intel GPUs (Arc, Xe)<br>"
+                    "\u2022 Older Intel iGPUs: stick with OpenGL (wined3d)"
+                )
+
+        if recommendations:
+            msg += "<br>" + "<br><br>".join(recommendations)
+
+        msg += (
+            "<br><br><i>Use 'Switch GPU Backend' to apply "
+            "the recommended renderer.</i>"
+        )
+
+        QMessageBox.information(self, "GPU Detection & Recommendations", msg)
+        self.log("GPU detection completed \u2013 see recommendations dialog.")
 
     # ── Stability Fixes ───────────────────────────────────────────────
 
@@ -1015,6 +1516,116 @@ class PhotoshopInstallerGUI(QMainWindow):
             self.log_ok("All stability fixes applied.")
         except Exception as e:
             self.log_err(f"Fix error: {e}")
+
+    # ── Full Environment Reset ────────────────────────────────────────
+
+    def full_environment_reset(self):
+        """Kill all Wine processes, remove locks, optionally delete prefix."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("\u26a0 Full Environment Reset")
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setText(
+            "<b>This will forcefully reset the Wine environment:</b><br><br>"
+            "\u2022 Kill ALL running Wine processes<br>"
+            "\u2022 Remove all lock files and temp data<br>"
+            "\u2022 Clean winetricks cache<br><br>"
+            "<b>Choose an option:</b>"
+        )
+        btn_clean = msg.addButton(
+            "Kill Processes + Clean Locks", QMessageBox.ButtonRole.AcceptRole
+        )
+        btn_full = msg.addButton(
+            "Full Reset (+ Delete Prefix)", QMessageBox.ButtonRole.DestructiveRole
+        )
+        msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked is None or clicked.text() == "Cancel":
+            return
+
+        delete_prefix = (clicked == btn_full)
+
+        if delete_prefix:
+            confirm = QMessageBox.warning(
+                self, "Confirm Full Reset",
+                "This will DELETE the entire Wine prefix!\n"
+                f"{get_prefix_path()}\n\n"
+                "All installed applications (Photoshop) will be lost!\n"
+                "Are you absolutely sure?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+
+        self.log("<b>\u26a0 Starting Full Environment Reset...</b>")
+
+        # Step 1: Kill processes
+        self.log("Step 1: Killing all Wine processes...")
+        killed, locks = self._kill_all_wine_processes()
+        if killed:
+            self.log(f"  Killed: {', '.join(killed)}")
+        else:
+            self.log("  No Wine processes were running.")
+        if locks > 0:
+            self.log(f"  Removed {locks} lock/temp file(s).")
+
+        # Step 2: Clean winetricks cache
+        wt_cache = Path.home() / ".cache" / "winetricks"
+        if wt_cache.exists():
+            self.log("Step 2: Cleaning winetricks cache...")
+            shutil.rmtree(wt_cache, ignore_errors=True)
+            self.log("  Winetricks cache removed.")
+        else:
+            self.log("Step 2: No winetricks cache found.")
+
+        # Step 3: Optionally delete prefix
+        prefix = Path(get_prefix_path())
+        if delete_prefix and prefix.exists():
+            self.log("Step 3: Deleting Wine prefix...")
+            shutil.rmtree(prefix, ignore_errors=True)
+            self.log_ok(f"  Prefix deleted: {prefix}")
+        elif delete_prefix:
+            self.log("Step 3: Prefix doesn't exist, nothing to delete.")
+        else:
+            self.log("Step 3: Prefix preserved (not deleting).")
+
+        # Step 4: Wait a moment then verify
+        time.sleep(1)
+        remaining = []
+        for proc_name in ["wineserver", "wine", "wine64"]:
+            try:
+                result = subprocess.run(
+                    ["pgrep", "-f", proc_name],
+                    capture_output=True, timeout=3,
+                )
+                if result.returncode == 0:
+                    remaining.append(proc_name)
+            except Exception:
+                pass
+
+        if remaining:
+            self.log_err(
+                f"\u26a0 Some processes still running: {', '.join(remaining)}. "
+                "Try running the reset again."
+            )
+        else:
+            self.log_ok("\u2705 Environment is clean. No Wine processes running.")
+
+        if delete_prefix:
+            self.log_ok(
+                "<b>Full reset complete!</b> "
+                "Use 'One-Click Setup' to rebuild from scratch."
+            )
+        else:
+            self.log_ok(
+                "<b>Process cleanup complete!</b> "
+                "You can now retry your operation."
+            )
+
+        self._set_busy(False)
+        self.progress_bar.setValue(0)
+        self._refresh_status()
 
     # ── Deep Repair ───────────────────────────────────────────────────
 
@@ -1063,9 +1674,26 @@ class PhotoshopInstallerGUI(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        # Kill wine processes first to prevent locks
+        self.log("Stopping Wine processes before deletion...")
+        killed, locks = self._kill_all_wine_processes()
+        if killed:
+            self.log(f"  Killed: {', '.join(killed)}")
+        if locks > 0:
+            self.log(f"  Removed {locks} lock file(s)")
+
         self.log(f"Deleting prefix: {prefix}")
         shutil.rmtree(prefix, ignore_errors=True)
-        self.log_ok("Wine prefix deleted.")
+
+        # Verify deletion
+        if prefix.exists():
+            self.log_err(
+                "Could not fully delete prefix. "
+                "Some files may be locked. Try 'Full Environment Reset'."
+            )
+        else:
+            self.log_ok("Wine prefix deleted.")
+        self._refresh_status()
 
     # ── Save Log ──────────────────────────────────────────────────────
 
