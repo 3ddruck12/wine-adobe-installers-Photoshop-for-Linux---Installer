@@ -222,7 +222,7 @@ AppImage
 
 ## 🤝 Credits
 
-- **[Affinity on Linux](https://github.com/Wanaty/Affinity-Installer)** — Original UI inspiration.
+- **[Affinity on Linux](https://github.com/ryzendew/Linux-Affinity-Installer)** — Original UI inspiration.
 - **Wine Project** — The compatibility layer that makes this possible.
 - **The Linux Community** — Continuous improvements to Wine, AppImage, and related tools.
 
