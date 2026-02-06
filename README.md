@@ -5,7 +5,7 @@
 A modern, portable AppImage that installs and runs **Adobe Photoshop** on Linux.  
 Wine 11.1 is **pre-compiled and bundled** — no build tools needed on the user's system.
 
-Inspired by the [Affinity on Linux](https://github.com/Wanaty/Affinity-Installer) project.
+Inspired by the [Affinity on Linux](https://github.com/ryzendew/Linux-Affinity-Installer)project.
 
 ---
 
