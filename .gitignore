@@ -32,6 +32,7 @@ version_configs.json.bak
 python-standalone.tar.gz
 
 # Logs
+photoshop_install_log*.txt
 install_log*.txt
 
 # Agent and AI data

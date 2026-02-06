@@ -1,5 +1,13 @@
 # Changelog – Photoshop AppImage
 
+## v3.05-alpha (2026-02-06)
+
+### Sonstiges
+- **Lizenz-Header hinzugefügt:** `PhotoshopInstaller.py` und `build_appimage.sh` unter GNU GPL v3.0 lizenziert.
+- **Gitignore Update:** `photoshop_install_log*.txt` wird nun ignoriert, um keine privaten Installations-Logs hochzuladen.
+
+---
+
 ## v3.04-alpha (2026-02-06)
 
 ### Features
