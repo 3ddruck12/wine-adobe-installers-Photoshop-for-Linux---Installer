@@ -1,5 +1,20 @@
 # Changelog – Photoshop AppImage
 
+## v3.02-alpha (2026-02-06)
+
+### Architektur
+- **WoW64-Support:** Wine wird jetzt mit `--enable-archs=x86_64,i386` statt `--enable-win64` kompiliert. 32-bit Windows-DLLs (PE) sind direkt im AppImage enthalten – kein separates 32-bit Wine nötig.
+- **`syswow64/ntdll.dll` Fix:** 32-bit Installer/Apps laden jetzt korrekt, da Wine die i386-PE-DLLs mitbringt.
+
+### Bugfixes
+- **MinGW-Check im Build-Script:** `i686-w64-mingw32-gcc` und `x86_64-w64-mingw32-gcc` werden vor dem Build geprüft mit Installationshinweisen.
+- **WINEDLLPATH erweitert:** AppRun und `_make_env()` setzen jetzt sowohl `x86_64-unix` als auch `i386-unix` DLL-Pfade.
+- **PE-Bitness-Erkennung:** `detect_pe_bitness()` liest den PE-Header und erkennt 32-bit vs 64-bit Installer.
+- **GPU-Backend Dialog:** Vulkan (DXVK) oder OpenGL (wined3d) per Dialog wählbar statt Einweg-Setzen.
+- **Vulkan/DRI3 Hints:** Bei Vulkan- oder DRI3-Fehlern in der Wine-Ausgabe erscheinen hilfreiche Hinweise im Log.
+
+---
+
 ## v3.01-alpha (2026-02-06)
 
 ### Bugfixes

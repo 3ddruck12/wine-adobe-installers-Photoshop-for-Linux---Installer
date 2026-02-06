@@ -451,8 +451,8 @@ class PhotoshopInstallerGUI(QMainWindow):
         app_menu.addSeparator()
         app_menu.addAction("About", lambda: QMessageBox.about(
             self, "About",
-            "Photoshop for Linux v3.01-alpha\n"
-            "Wine 11.1 · Pre-compiled build\n"
+            "Photoshop for Linux v3.02-alpha\n"
+            "Wine 11.1 · Pre-compiled build (WoW64)\n"
             "Community project – not affiliated with Adobe."
         ))
         menu_btn.setMenu(app_menu)
