@@ -184,8 +184,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QFrame, QProgressBar, QScrollArea,
     QTextEdit, QGroupBox, QFileDialog, QLineEdit, QMessageBox, QMenu,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QUrl
+from PyQt6.QtGui import QIcon, QPixmap, QDesktopServices
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +449,21 @@ class PhotoshopInstallerGUI(QMainWindow):
         header.addWidget(title)
         header.addStretch()
 
+        donate_btn = QPushButton("\u2615 Donate")
+        donate_btn.setObjectName("donateBtn")
+        donate_btn.setToolTip("Support this project on Ko-fi")
+        donate_btn.setStyleSheet(
+            "QPushButton#donateBtn {"
+            "  background-color: #ff5e5b; color: white; font-weight: bold;"
+            "  border: none; border-radius: 6px; padding: 6px 14px;"
+            "}"
+            "QPushButton#donateBtn:hover { background-color: #ff3b37; }"
+        )
+        donate_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl("https://ko-fi.com/3ddruck12"))
+        )
+        header.addWidget(donate_btn)
+
         menu_btn = QPushButton("\u2630")
         menu_btn.setFixedWidth(50)
         menu_btn.setObjectName("menuBtn")
@@ -456,11 +471,15 @@ class PhotoshopInstallerGUI(QMainWindow):
         app_menu.addAction("Help", self.show_help)
         app_menu.addAction("Export Log", self.save_log)
         app_menu.addSeparator()
+        app_menu.addAction("\u2615 Donate (Ko-fi)",
+            lambda: QDesktopServices.openUrl(QUrl("https://ko-fi.com/3ddruck12"))
+        )
         app_menu.addAction("About", lambda: QMessageBox.about(
             self, "About",
             "Photoshop for Linux v3.03-alpha\n"
-            "Wine 11.1 · Pre-compiled build (WoW64)\n"
-            "Community project – not affiliated with Adobe."
+            "Wine 11.1 \u00b7 Pre-compiled build (WoW64)\n"
+            "Community project \u2013 not affiliated with Adobe.\n\n"
+            "\u2615 Support: https://ko-fi.com/3ddruck12"
         ))
         menu_btn.setMenu(app_menu)
         header.addWidget(menu_btn)
