@@ -9,6 +9,14 @@ Inspired by the [Affinity on Linux](https://github.com/Wanaty/Affinity-Installer
 
 ---
 
+## ☕ Support This Project
+
+This project is developed and maintained in my free time. If you find it useful, please consider supporting its development with a donation — it helps cover hosting, testing hardware, and the many hours of work that go into making Photoshop run smoothly on Linux.
+
+<a href="https://ko-fi.com/3ddruck12"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi" /></a>
+
+---
+
 ## 🚀 Features
 
 - **Zero-compile experience** — Wine 11.1 ships pre-built inside the AppImage.
