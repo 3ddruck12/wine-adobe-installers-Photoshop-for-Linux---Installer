@@ -1,4 +1,4 @@
-Selected: /home/cachyos/Downloads/Adobe Photoshop 2021.exe
+Selected: /home/cachyos/Downloads/Adobe Photoshop 2021 v22.5.1.441 (x64) Multilingual/Set-up.exe
 Starting One-Click Setup...
 Initializing Wine prefix...
 Installing component: msxml3 (1/6)...
@@ -9,11 +9,12 @@ Installing component: gdiplus (5/6)...
 Installing component: corefonts (6/6)...
 Wine environment setup completed.
 Setup completed! You can now run the Photoshop installer.
-Running installer: /home/cachyos/Downloads/Adobe Photoshop 2021.exe
-Error running installer: 'utf-8' codec can't decode byte 0x81 in position 103: invalid start byte
-Installer process reported an error.
-Selected: /home/cachyos/Downloads/Adobe Photoshop 2021 v22.5.1.441 (x64) Multilingual/Set-up.exe
 Running installer: /home/cachyos/Downloads/Adobe Photoshop 2021 v22.5.1.441 (x64) Multilingual/Set-up.exe
-Error running installer: 'utf-8' codec can't decode byte 0x81 in position 103: invalid start byte
+This installer appears to be 32-bit, but the bundled Wine build is 64-bit only.
+Please use a 64-bit installer (e.g. Set-up.exe) or rebuild with WoW64 (32-bit) support.
 Installer process reported an error.
-Failed to save log: [Errno 30] Das Dateisystem ist nur lesbar: '/tmp/.mount_PhotosFKdiCI/opt/photoshop-installer/photoshop_install_log.txt'
+Selected: /home/cachyos/Downloads/Adobe Photoshop 2021.exe
+Running installer: /home/cachyos/Downloads/Adobe Photoshop 2021.exe
+This installer appears to be 32-bit, but the bundled Wine build is 64-bit only.
+Please use a 64-bit installer (e.g. Set-up.exe) or rebuild with WoW64 (32-bit) support.
+Installer process reported an error.

@@ -1,5 +1,12 @@
 # Changelog – Photoshop AppImage
 
+## v3.03-alpha (2026-02-06)
+
+### Bugfixes
+- **WoW64-Erkennung repariert:** `wine_supports_32bit()` prüft jetzt auch `i386-windows/` (PE-DLLs), nicht nur `i386-unix/`. WoW64-Builds haben kein `i386-unix/` – deshalb wurden 32-bit Installer fälschlich blockiert.
+
+---
+
 ## v3.02-alpha (2026-02-06)
 
 ### Architektur
