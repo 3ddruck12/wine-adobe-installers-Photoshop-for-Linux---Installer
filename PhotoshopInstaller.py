@@ -90,21 +90,28 @@ def detect_pe_bitness(exe_path):
 
 
 def wine_supports_32bit(wine_path):
-    """Return True if Wine appears to have 32-bit (WoW64) support bundled."""
+    """Return True if Wine appears to have 32-bit (WoW64) support bundled.
+
+    WoW64 builds have i386-windows/ (PE DLLs) but no i386-unix/ dir.
+    Classic multilib builds have both i386-unix/ and i386-windows/.
+    We check for either.
+    """
     candidates = []
     appdir = os.environ.get("APPDIR")
     if appdir:
-        candidates.extend([
-            os.path.join(appdir, "usr", "lib", "wine", "i386-unix"),
-            os.path.join(appdir, "usr", "lib32", "wine", "i386-unix"),
-            os.path.join(appdir, "usr", "lib", "i386-linux-gnu", "wine", "i386-unix"),
-        ])
+        for sub in ("i386-unix", "i386-windows"):
+            candidates.extend([
+                os.path.join(appdir, "usr", "lib", "wine", sub),
+                os.path.join(appdir, "usr", "lib32", "wine", sub),
+                os.path.join(appdir, "usr", "lib", "i386-linux-gnu", "wine", sub),
+            ])
     if wine_path:
         base = os.path.abspath(os.path.join(os.path.dirname(wine_path), ".."))
-        candidates.extend([
-            os.path.join(base, "lib", "wine", "i386-unix"),
-            os.path.join(base, "lib32", "wine", "i386-unix"),
-        ])
+        for sub in ("i386-unix", "i386-windows"):
+            candidates.extend([
+                os.path.join(base, "lib", "wine", sub),
+                os.path.join(base, "lib32", "wine", sub),
+            ])
     return any(os.path.isdir(p) for p in candidates)
 
 
