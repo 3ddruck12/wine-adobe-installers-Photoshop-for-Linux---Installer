@@ -1,5 +1,13 @@
 # Changelog – Photoshop AppImage
 
+## v3.04-alpha (2026-02-06)
+
+### Features
+- **Donate-Button in der GUI:** Roter "☕ Donate" Button im Header öffnet Ko-fi im Browser. Auch im Hamburger-Menü und About-Dialog verlinkt.
+- **Ko-fi Link in README:** Spendenaufruf prominent auf der GitHub-Projektseite.
+
+---
+
 ## v3.03-alpha (2026-02-06)
 
 ### Bugfixes
