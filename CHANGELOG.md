@@ -2,9 +2,76 @@
 
 ## v3.05-alpha (2026-02-06)
 
-### Sonstiges
+### ✨ Features (Top 5)
+
+#### 📐 DPI-Skalierung
+- **Neuer Button:** "Configure DPI Scaling" in Advanced Settings
+- **Slider-Dialog:** 96–480 DPI mit Live-Prozentanzeige (100%–500%)
+- **Presets:** Schnell-Buttons für 100%, 125%, 150%, 200%, 300%
+- **Registry-Integration:** Liest/schreibt DPI-Wert in `HKCU\Control Panel\Desktop` und `HKCU\Software\Wine\Fonts`
+- **Ideal für:** HiDPI-Monitore (z.B. 2560×1600), damit Photoshop nicht winzig wirkt
+
+#### 🎮 Erweitertes GPU-Backend & vkd3d/DXVK
+- **Neuer Button:** "Switch GPU Backend (Vulkan / GL)" mit erweiterten Optionen
+- **4 Renderer-Optionen:**
+  - **DXVK (Vulkan)** — Schnellste Performance, Standard für moderne GPUs
+  - **vkd3d-proton (Vulkan + OpenCL)** — Für Photoshop-Filter, Neural Filters, GPU-beschleunigt
+  - **OpenGL (wined3d)** — Höchste Kompatibilität, langsamer
+  - **GDI (Software)** — Fallback bei GPU-Treibler-Problemen
+- **Auto-Install:** vkd3d-proton wird automatisch via winetricks installiert
+- **GPU-Anzeige:** Erkannte GPUs werden im Dialog angezeigt
+
+#### ✕ Operation Abbrechen & Cleanup
+- **Cancel-Button:** Erscheint neben Progressbar bei laufenden Tasks
+- **Gründliches Cleanup bei Abbruch:**
+  - Thread terminieren
+  - **ALLE** Wine-Prozesse killen (wine, wine64, wineserver, winetricks, etc.)
+  - wineserver-Sockets aufräumen
+  - `.lck` Lock-Dateien löschen
+  - `/tmp/.wine-*` Temp-Verzeichnisse bereinigen
+- **Hinweise:** Tipps zum "Full Environment Reset" falls noch Probleme
+
+#### 📊 Installations-Status-Dashboard
+- **Live-Anzeige:**
+  - 🍷 Wine-Version (z.B. wine-11.1)
+  - 🎨 Photoshop installiert? (Ja/Nein)
+  - 📁 Wine-Prefix Status
+  - 🎮 Erkannte GPUs mit Hersteller
+- **Refresh-Button:** Manuell aktualisieren
+- **Auto-Update:** Nach Setup, Installation, Installer-Finish
+
+#### 🎮 GPU-Auto-Erkennung & Empfehlungen
+- **Neuer Button:** "Detect GPU && Recommend Settings" in Advanced Settings
+- **Hardware-Erkennung via lspci:**
+  - NVIDIA, AMD, Intel GPUs
+  - Dual-GPU Setups
+- **Vendor-spezifische Empfehlungen:**
+  - **NVIDIA:** DXVK empfohlen, Hinweise zu Treibern & `__GL_SHADER_DISK_CACHE`
+  - **AMD:** DXVK + RADV, `RADV_PERFTEST=gpl` Tipp
+  - **Intel:** OpenGL für alte iGPUs, Vulkan für Arc/Xe
+- **Popup-Dialog** mit allen Details
+
+#### 🛠️ Bonus: Full Environment Reset
+- **Neuer Button:** "⚠ Full Environment Reset" (orange) in Maintenance
+- **Zwei Modi:**
+  - **"Kill Processes + Clean Locks"** — Killt alles, putzt Locks + Winetricks-Cache, **behält Prefix**. Ideal für Retry nach Fehler.
+  - **"Full Reset (+ Delete Prefix)"** — Kompletter Wipeout. Doppelte Bestätigung als Schutz.
+- **Was wird gemacht:**
+  - Alle Wine-Prozesse terminieren (graceful + force)
+  - Lock-Dateien & Temp-Verzeichnisse löschen
+  - Winetricks-Cache bereinigen
+  - Optional: komplettes Prefix löschen
+  - Status-Verification danach
+
+#### 🐛 Verbesserungen zu bestehenden Funktionen
+- **Abbruch-Dialog:** Detailliertere Warnung, was passiert
+- **Delete Prefix:** Killt jetzt auch Prozesse vor Löschung, verifiziert Erfolg
+- **Status-Refresh:** Nach allen Operationen automatisch aktualisiert
+
+### 🏗️ Sonstiges
 - **Lizenz-Header hinzugefügt:** `PhotoshopInstaller.py` und `build_appimage.sh` unter GNU GPL v3.0 lizenziert.
 - **Gitignore Update:** `photoshop_install_log*.txt` wird nun ignoriert, um keine privaten Installations-Logs hochzuladen.
+- **Versionsstring updated:** GUI zeigt jetzt "v3.05-alpha"
 
 ---
 
