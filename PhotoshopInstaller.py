@@ -66,6 +66,48 @@ def get_prefix_path():
     return str(Path.home() / ".photoshop_cc")
 
 
+def detect_pe_bitness(exe_path):
+    """Detect PE executable bitness: returns 'x86', 'x64', or 'unknown'."""
+    try:
+        with open(exe_path, "rb") as f:
+            mz = f.read(64)
+            if len(mz) < 64 or mz[:2] != b"MZ":
+                return "unknown"
+            e_lfanew = int.from_bytes(mz[60:64], "little")
+            f.seek(e_lfanew)
+            pe = f.read(6)
+            if len(pe) < 6 or pe[:4] != b"PE\0\0":
+                return "unknown"
+            f.seek(e_lfanew + 24)
+            magic = int.from_bytes(f.read(2), "little")
+            if magic == 0x10B:
+                return "x86"
+            if magic == 0x20B:
+                return "x64"
+    except Exception:
+        return "unknown"
+    return "unknown"
+
+
+def wine_supports_32bit(wine_path):
+    """Return True if Wine appears to have 32-bit (WoW64) support bundled."""
+    candidates = []
+    appdir = os.environ.get("APPDIR")
+    if appdir:
+        candidates.extend([
+            os.path.join(appdir, "usr", "lib", "wine", "i386-unix"),
+            os.path.join(appdir, "usr", "lib32", "wine", "i386-unix"),
+            os.path.join(appdir, "usr", "lib", "i386-linux-gnu", "wine", "i386-unix"),
+        ])
+    if wine_path:
+        base = os.path.abspath(os.path.join(os.path.dirname(wine_path), ".."))
+        candidates.extend([
+            os.path.join(base, "lib", "wine", "i386-unix"),
+            os.path.join(base, "lib32", "wine", "i386-unix"),
+        ])
+    return any(os.path.isdir(p) for p in candidates)
+
+
 def detect_distro():
     """Detect Linux distribution family for package management."""
     try:
@@ -246,6 +288,16 @@ class InstallerRunnerThread(QThread):
             env = os.environ.copy()
             env["WINEPREFIX"] = self.prefix_path
             self.log_signal.emit(f"Running installer: {self.exe_path}")
+            bitness = detect_pe_bitness(self.exe_path)
+            if bitness == "x86" and not wine_supports_32bit(self.wine_path):
+                self.log_signal.emit(
+                    "This installer appears to be 32-bit, but the bundled Wine build is 64-bit only."
+                )
+                self.log_signal.emit(
+                    "Please use a 64-bit installer (e.g. Set-up.exe) or rebuild with WoW64 (32-bit) support."
+                )
+                self.finished_signal.emit(False)
+                return
             proc = subprocess.run(
                 [self.wine_path, self.exe_path],
                 env=env, capture_output=True, text=True,
@@ -255,6 +307,15 @@ class InstallerRunnerThread(QThread):
                 self.log_signal.emit(f"Installer exited with code {proc.returncode}")
                 if proc.stderr:
                     self.log_signal.emit(proc.stderr[:1000])
+                    err_lower = proc.stderr.lower()
+                    if "vulkan" in err_lower or "dri3" in err_lower:
+                        self.log_signal.emit(
+                            "Hint: Vulkan/DRI3 errors detected. Try switching GPU backend to OpenGL (wined3d)."
+                        )
+                    if "syswow64" in err_lower and "ntdll.dll" in err_lower:
+                        self.log_signal.emit(
+                            "Hint: Missing syswow64 indicates a 32-bit app running on 64-bit-only Wine."
+                        )
                 self.finished_signal.emit(False)
             else:
                 self.log_signal.emit("Installer process finished.")
@@ -841,14 +902,31 @@ class PhotoshopInstallerGUI(QMainWindow):
             self.log_err("winetricks not found. Install it first.")
             return
         env = self._wine_env()
-        self.log("Setting renderer to Vulkan (DXVK)...")
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Switch GPU Backend")
+        msg.setText("Choose the GPU backend for Wine rendering.")
+        btn_vulkan = msg.addButton("Vulkan (DXVK)", QMessageBox.ButtonRole.AcceptRole)
+        btn_gl = msg.addButton("OpenGL (wined3d)", QMessageBox.ButtonRole.DestructiveRole)
+        msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked is None or clicked.text() == "Cancel":
+            return
+
+        if clicked == btn_gl:
+            self.log("Setting renderer to OpenGL (wined3d)...")
+            cmd = ["winetricks", "renderer=gl"]
+        else:
+            self.log("Setting renderer to Vulkan (DXVK)...")
+            cmd = ["winetricks", "renderer=vulkan"]
         try:
             subprocess.run(
-                ["winetricks", "renderer=vulkan"], env=env,
+                cmd, env=env,
                 capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=30,
             )
-            self.log_ok("Vulkan backend activated.")
+            self.log_ok("GPU backend updated.")
         except Exception as e:
             self.log_err(f"Failed to switch backend: {e}")
 

@@ -4,6 +4,8 @@
 
 ### Bugfixes
 - **UTF-8 Encoding-Crash behoben:** Wine gibt beim Starten von .exe-Dateien Nicht-UTF-8-Bytes aus (z.B. Windows-1252 `0x81`). Alle `subprocess.run()` Aufrufe verwenden jetzt `encoding="utf-8", errors="replace"` statt striktem Decoding. Betroffene Stellen: `wineboot --init`, `winetricks`-Komponenten, Installer-Runner, Vulkan-Backend-Switch.
+- **32-bit Installer-Guard:** 32-bit PE-Installer werden erkannt und blockiert, wenn das AppImage nur 64-bit Wine enthält. Klarer Hinweis auf 64-bit Setup (z.B. `Set-up.exe`) oder WoW64-Rebuild.
+- **GPU-Backend Auswahl:** Dialog zum Umschalten zwischen Vulkan (DXVK) und OpenGL (wined3d) statt Einweg-Setzen auf Vulkan.
 
 ---
 
