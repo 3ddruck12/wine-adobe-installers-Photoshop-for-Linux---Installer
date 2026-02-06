@@ -1,5 +1,0 @@
-TESTDLL = vccorlib140.dll
-IMPORTS = combase ole32 uuid
-
-SOURCES = \
-	vccorlib.c

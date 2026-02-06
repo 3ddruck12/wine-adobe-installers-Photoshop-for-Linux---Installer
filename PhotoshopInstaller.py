@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Photoshop Linux Installer - PyQt6 GUI Version
-Inspired by Affinity Linux Installer, tailored for Adobe Photoshop CC 2021+.
+Photoshop Linux Installer - PyQt6 GUI
+Installs Adobe Photoshop on Linux via a pre-compiled Wine 11.1 build.
+All Wine compilation happens at AppImage build time, not at runtime.
 """
 
 import os
@@ -9,222 +10,153 @@ import sys
 import subprocess
 import shutil
 import threading
-import platform
 import json
 from pathlib import Path
 import time
 
+
+# ---------------------------------------------------------------------------
+# Utility helpers
+# ---------------------------------------------------------------------------
+
+def get_base_dir():
+    """Return the base directory – respects AppImage mount point."""
+    appdir = os.environ.get("APPDIR")
+    if appdir:
+        return os.path.join(appdir, "opt", "photoshop-installer")
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def get_wine_binary():
+    """Return path to the bundled Wine binary."""
+    appdir = os.environ.get("APPDIR")
+    if appdir:
+        wine = os.path.join(appdir, "usr", "bin", "wine")
+        if os.path.isfile(wine) and os.access(wine, os.X_OK):
+            return wine
+
+    # Fallback: development / non-AppImage
+    dev_wine = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "wine-11.1-build", "wine"
+    )
+    if os.path.isfile(dev_wine) and os.access(dev_wine, os.X_OK):
+        return dev_wine
+
+    # Last resort: system wine
+    system_wine = shutil.which("wine")
+    if system_wine:
+        return system_wine
+
+    return None
+
+
+def get_wine_server():
+    """Return path to the bundled wineserver."""
+    wine = get_wine_binary()
+    if wine:
+        server = os.path.join(os.path.dirname(wine), "wineserver")
+        if os.path.isfile(server):
+            return server
+    return shutil.which("wineserver")
+
+
+def get_prefix_path():
+    """Return the Wine prefix path."""
+    return str(Path.home() / ".photoshop_cc")
+
+
 def detect_distro():
-    """Detect distribution for package installation"""
+    """Detect Linux distribution family for package management."""
     try:
         if os.path.exists("/etc/os-release"):
-            with open("/etc/os-release", "r") as f:
-                lines = f.readlines()
             info = {}
-            for line in lines:
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    info[key.strip()] = value.strip().strip('"')
-            
+            with open("/etc/os-release", "r") as f:
+                for line in f:
+                    if "=" in line:
+                        k, v = line.strip().split("=", 1)
+                        info[k] = v.strip('"')
             distro = info.get("ID", "unknown").lower()
-            # Handle derivatives
-            if distro in ["ubuntu", "debian", "pop", "mint", "kali", "trixie", "sid"]:
+            id_like = info.get("ID_LIKE", "").lower()
+
+            if distro in ("ubuntu", "debian", "pop", "mint", "kali", "elementary", "zorin") or "debian" in id_like:
                 return "debian"
-            if distro in ["arch", "manjaro", "cachyos", "endeavouros"]:
+            if distro in ("arch", "manjaro", "cachyos", "endeavouros", "garuda") or "arch" in id_like:
                 return "arch"
-            if distro in ["fedora", "nobara", "redhat", "centos", "rocky", "alma"]:
+            if distro in ("fedora", "nobara", "redhat", "centos", "rocky", "alma") or "fedora" in id_like:
                 return "fedora"
-            if distro in ["opensuse", "opensuse-leap", "opensuse-tumbleweed", "suse"]:
+            if distro in ("opensuse", "opensuse-leap", "opensuse-tumbleweed", "suse") or "suse" in id_like:
                 return "suse"
             return distro
     except Exception:
         pass
     return "unknown"
 
-def install_package(package_name, import_name=None, system_pkg=None):
-    """Install a Python package if not available, trying system manager first for critical ones"""
-    if import_name is None:
-        import_name = package_name
-    
+
+# ---------------------------------------------------------------------------
+# Attempt to import / install PyQt6
+# ---------------------------------------------------------------------------
+
+def ensure_pyqt6():
+    """Make sure PyQt6 is importable. Return True on success."""
     try:
-        __import__(import_name)
+        import PyQt6.QtWidgets  # noqa: F401
         return True
     except ImportError:
-        print(f"Package {package_name} is missing. Attempting installation...")
-        distro = detect_distro()
-        
-        # Mapping of common python packages to system packages
-        sys_map = {
-            "PyQt6": {
-                "debian": "python3-pyqt6",
-                "arch": "python-pyqt6",
-                "fedora": "python3-pyqt6",
-                "suse": "python3-qt6"
-            }
-        }
-        
-        target_sys_pkg = system_pkg or sys_map.get(package_name, {}).get(distro)
-        
-        if target_sys_pkg:
-            print(f"Trying to install system package: {target_sys_pkg}")
-            cmd = ""
-            if distro == "debian":
-                cmd = f"pkexec apt update && pkexec apt install -y {target_sys_pkg} libxcb-cursor0"
-            elif distro == "arch":
-                cmd = f"pkexec pacman -S --noconfirm {target_sys_pkg}"
-            elif distro == "fedora":
-                cmd = f"pkexec dnf install -y {target_sys_pkg}"
-            elif distro == "suse":
-                cmd = f"pkexec zypper install -y {target_sys_pkg}"
-            
-            if cmd:
-                try:
-                    subprocess.check_call(cmd, shell=True)
-                    return True
-                except Exception as e:
-                    print(f"System installation failed: {e}")
+        pass
 
-        # Fallback to pip
-        print(f"Falling back to pip installation for {package_name}...")
-        pip_flags = ["--user"]
-        
-        # Check if we need --break-system-packages (PEP 668)
-        # Usually indicated by the presence of EXTERNALLY-MANAGED file in python lib dir
-        is_managed = False
-        import glob
-        if glob.glob("/usr/lib/python3*/EXTERNALLY-MANAGED"):
-            is_managed = True
-        
-        if is_managed:
-            pip_flags.append("--break-system-packages")
-        
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name] + pip_flags)
-            return True
-        except Exception as e:
-            # Check if pip itself is missing
-            if "No module named pip" in str(e) or subprocess.call([sys.executable, "-m", "pip", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
-                print("Error: 'pip' is not installed. Please install 'python3-pip' first.")
-            print(f"Failed to install {package_name} via pip: {e}")
-            return False
+    # Running inside AppImage → should always be bundled
+    if os.environ.get("APPDIR"):
+        print("FATAL: PyQt6 not found inside AppImage bundle. Rebuild required.")
+        return False
 
-# Initialize PyQt6
-if not install_package("PyQt6"):
-    print("\n" + "="*50)
-    print("CRITICAL ERROR: Failed to install or import PyQt6!")
-    print("Please install it manually:")
-    print("Debian/Ubuntu: sudo apt install python3-pyqt6 libxcb-cursor0")
-    print("Arch Linux:     sudo pacman -S python-pyqt6")
-    print("Fedora:         sudo dnf install python3-pyqt6")
-    print("="*50 + "\n")
+    # Development mode – try pip install
+    print("PyQt6 not found, attempting pip install...")
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "--user", "PyQt6"],
+            stdout=subprocess.DEVNULL
+        )
+        return True
+    except Exception as e:
+        print(f"Failed to install PyQt6: {e}")
+        print("Please install manually:")
+        print("  Debian/Ubuntu:  sudo apt install python3-pyqt6 libxcb-cursor0")
+        print("  Arch:           sudo pacman -S python-pyqt6")
+        print("  Fedora:         sudo dnf install python3-pyqt6")
+        return False
+
+
+if not ensure_pyqt6():
     sys.exit(1)
-
-from PyQt6.QtWidgets import QApplication
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFrame, QProgressBar, QScrollArea, QSizePolicy,
-    QTextEdit, QGroupBox, QFileDialog, QLineEdit, QMessageBox, QMenu
+    QPushButton, QLabel, QFrame, QProgressBar, QScrollArea,
+    QTextEdit, QGroupBox, QFileDialog, QLineEdit, QMessageBox, QMenu,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
-from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QPixmap, QScreen
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QIcon, QPixmap
+
+
+# ---------------------------------------------------------------------------
+# Worker threads
+# ---------------------------------------------------------------------------
 
 class DependencyChecker(QThread):
+    """Check for required runtime dependencies (not build deps anymore)."""
     status_signal = pyqtSignal(dict)
 
     def run(self):
         deps = {
-            "gcc": "gcc",
-            "flex": "flex",
-            "bison": "bison",
-            "make": "make",
-            "git": "git",
-            "winetricks": "winetricks"
+            "wine (bundled)": get_wine_binary() is not None,
+            "winetricks": shutil.which("winetricks") is not None,
         }
-        results = {}
-        for name, cmd in deps.items():
-            installed = shutil.which(cmd) is not None
-            results[name] = installed
-            time.sleep(0.1)
-        self.status_signal.emit(results)
+        self.status_signal.emit(deps)
 
-class WineBuildThread(QThread):
-    log_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int)
-    finished_signal = pyqtSignal(bool)
 
-    def __init__(self, source_path):
-        super().__init__()
-        self.source_path = source_path
-        self.build_path = None
-
-    def set_build_dir(self, path):
-        self.build_path = path
-
-    def run(self):
-        try:
-            work_dir = self.source_path
-            
-            # If a build path is set (writable location), copy sources there
-            if self.build_path:
-                self.log_signal.emit(f"Preparing build directory: {self.build_path}")
-                if os.path.exists(self.build_path):
-                    try:
-                        shutil.rmtree(self.build_path)
-                    except Exception as e:
-                        self.log_signal.emit(f"Warning: Could not clean old build dir: {e}")
-                
-                self.log_signal.emit("Copying source files to writable location...")
-                shutil.copytree(self.source_path, self.build_path)
-                work_dir = self.build_path
-            
-            os.chdir(work_dir)
-            self.log_signal.emit("Configuring Wine...")
-            # Simple check for autogen.sh
-            if os.path.exists("autogen.sh"):
-                self.run_command(["./autogen.sh"])
-            
-            self.run_command(["./configure", "--enable-win64"])
-            self.progress_signal.emit(20)
-            
-            self.log_signal.emit("Building Wine (this will take a while)...")
-            # Using -j$(nproc) for faster build, but limit to 4 to avoid OOM on some systems
-            nproc = min(os.cpu_count() or 1, 4)
-            self.run_command(["make", f"-j{nproc}"])
-            self.progress_signal.emit(90)
-            
-            self.log_signal.emit("Wine build finished successfully.")
-            self.finished_signal.emit(True)
-        except Exception as e:
-            self.log_signal.emit(f"Error during Wine build: {e}")
-            self.finished_signal.emit(False)
-
-    def run_command(self, cmd):
-        """Helper to run command and capture output to log"""
-        self.log_signal.emit(f"Executing: {' '.join(cmd)}")
-        process = subprocess.Popen(
-            cmd, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.STDOUT, 
-            text=True,
-            bufsize=1,
-            universal_newlines=True
-        )
-        
-        for line in process.stdout:
-            # Optionally filter logging to avoid UI freeze on massive output
-            # For make, maybe only log errors or every 100th line?
-            # For now, let's log everything but strip whitespace
-            line = line.strip()
-            if line:
-                if "error" in line.lower() or "warning" in line.lower():
-                     self.log_signal.emit(line)
-        
-        process.wait()
-        if process.returncode != 0:
-            raise subprocess.CalledProcessError(process.returncode, cmd)
-
-class WineEnvironmentThread(QThread):
+class WineSetupThread(QThread):
+    """Initialize Wine prefix and install winetricks components."""
     log_signal = pyqtSignal(str)
     progress_signal = pyqtSignal(int)
     finished_signal = pyqtSignal(bool)
@@ -235,739 +167,867 @@ class WineEnvironmentThread(QThread):
         self.wine_path = wine_path
         self.components = components
 
+    def _make_env(self):
+        env = os.environ.copy()
+        env["WINEPREFIX"] = self.prefix_path
+        env["WINE"] = self.wine_path
+
+        wine_dir = os.path.dirname(self.wine_path)
+        wineserver = os.path.join(wine_dir, "wineserver")
+        if os.path.isfile(wineserver):
+            env["WINESERVER"] = wineserver
+
+        # Point to bundled Wine libs if inside AppImage
+        appdir = os.environ.get("APPDIR")
+        if appdir:
+            lib64 = os.path.join(appdir, "usr", "lib64", "wine")
+            lib32 = os.path.join(appdir, "usr", "lib", "wine")
+            extra = ":".join(filter(os.path.isdir, [lib64, lib32]))
+            if extra:
+                env["WINEDLLPATH"] = extra + ":" + env.get("WINEDLLPATH", "")
+
+        return env
+
+    def run(self):
+        try:
+            env = self._make_env()
+
+            # Step 1 – wineboot
+            self.log_signal.emit("Initializing Wine prefix...")
+            self.progress_signal.emit(5)
+            result = subprocess.run(
+                [self.wine_path, "wineboot", "--init"],
+                env=env,
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode != 0:
+                self.log_signal.emit(f"wineboot stderr: {result.stderr[:500]}")
+            self.progress_signal.emit(20)
+
+            # Step 2 – winetricks
+            if self.components:
+                total = len(self.components)
+                for i, comp in enumerate(self.components):
+                    self.log_signal.emit(f"Installing component: {comp} ({i+1}/{total})...")
+                    try:
+                        subprocess.run(
+                            ["winetricks", "-q", comp],
+                            env=env, capture_output=True, text=True, timeout=300,
+                        )
+                    except subprocess.TimeoutExpired:
+                        self.log_signal.emit(f"Warning: {comp} timed out, continuing...")
+                    pct = 20 + int((i + 1) / total * 70)
+                    self.progress_signal.emit(pct)
+
+            self.progress_signal.emit(95)
+            self.log_signal.emit("Wine environment setup completed.")
+            self.finished_signal.emit(True)
+
+        except Exception as e:
+            self.log_signal.emit(f"Error during Wine setup: {e}")
+            self.finished_signal.emit(False)
+
+
+class InstallerRunnerThread(QThread):
+    """Run an .exe installer inside Wine."""
+    log_signal = pyqtSignal(str)
+    finished_signal = pyqtSignal(bool)
+
+    def __init__(self, wine_path, prefix_path, exe_path):
+        super().__init__()
+        self.wine_path = wine_path
+        self.prefix_path = prefix_path
+        self.exe_path = exe_path
+
     def run(self):
         try:
             env = os.environ.copy()
             env["WINEPREFIX"] = self.prefix_path
-            env["WINE"] = self.wine_path
-            
-            self.log_signal.emit(f"Initializing Wine prefix at {self.prefix_path}...")
-            subprocess.check_call([self.wine_path, "wineboot", "--init"], env=env)
-            self.progress_signal.emit(30)
-            
-            self.log_signal.emit("Installing components via winetricks...")
-            for i, comp in enumerate(self.components):
-                self.log_signal.emit(f"Installing {comp}...")
-                subprocess.check_call(["winetricks", "-q", comp], env=env)
-                progress = 30 + int((i + 1) / len(self.components) * 60)
-                self.progress_signal.emit(progress)
-            
-            self.log_signal.emit("Wine environment setup finished.")
-            self.finished_signal.emit(True)
+            self.log_signal.emit(f"Running installer: {self.exe_path}")
+            proc = subprocess.run(
+                [self.wine_path, self.exe_path],
+                env=env, capture_output=True, text=True,
+            )
+            if proc.returncode != 0:
+                self.log_signal.emit(f"Installer exited with code {proc.returncode}")
+                if proc.stderr:
+                    self.log_signal.emit(proc.stderr[:1000])
+                self.finished_signal.emit(False)
+            else:
+                self.log_signal.emit("Installer process finished.")
+                self.finished_signal.emit(True)
         except Exception as e:
-            self.log_signal.emit(f"Error during environment setup: {e}")
+            self.log_signal.emit(f"Error running installer: {e}")
             self.finished_signal.emit(False)
 
-def get_base_dir():
-    """Get the base directory of the script or the AppImage"""
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(os.path.abspath(__file__))
-    else:
-        return os.path.dirname(os.path.abspath(__file__))
 
-def get_writable_wine_dir():
-    """Get a valid, writable directory for the Wine binary"""
-    # Prefer the writable user location if it exists (meaning we built it there)
-    user_dir = Path.home() / ".local" / "share" / "photoshop-installer" / "wine-src"
-    
-    # Check if the user build exists and has the wine binary
-    user_wine = user_dir / "wine"
-    if user_wine.exists() and os.access(user_wine, os.X_OK):
-        return str(user_wine)
-        
-    # Fallback/Default check (mostly for local dev env)
-    local_dev_wine = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns", "wine")
-    return local_dev_wine
-
+# ---------------------------------------------------------------------------
+# Main Window
+# ---------------------------------------------------------------------------
 
 class PhotoshopInstallerGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Photoshop for Linux")
-        self.setMinimumSize(800, 600)
-        self.dark_mode = True
-        
-        # Set Window Icon
-        icon_path = os.path.join(os.path.dirname(__file__), "pstux_icon.png")
+        self.setMinimumSize(820, 620)
+
+        icon_path = os.path.join(get_base_dir(), "pstux_icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-            
+
+        self._active_thread = None
         self.init_ui()
+        self.apply_theme()
         self.check_dependencies()
-        self.showMaximized()
+
+    # ── Theme ──────────────────────────────────────────────────────────
 
     def apply_theme(self):
         self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1a1a1a;
-            }
-            QWidget {
+            QMainWindow, QWidget {
                 background-color: #1a1a1a;
                 color: #e0e0e0;
                 font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
                 font-size: 13px;
             }
             #titleLabel {
-                font-size: 24px;
-                font-weight: bold;
-                color: #ffffff;
-                margin: 10px;
+                font-size: 24px; font-weight: bold; color: #ffffff;
             }
             #menuBtn {
-                font-size: 22px;
-                background-color: transparent;
-                border: none;
-                color: #b0b0b0;
+                font-size: 22px; background: transparent; border: none; color: #b0b0b0;
             }
-            #menuBtn:hover {
-                color: #ffffff;
-            }
-            #menuBtn::menu-indicator {
-                image: none;
-            }
+            #menuBtn:hover { color: #ffffff; }
+            #menuBtn::menu-indicator { image: none; }
             #statusCard {
-                background-color: #252525;
-                border: 1px solid #333333;
-                border-radius: 12px;
-                padding: 15px;
+                background-color: #252525; border: 1px solid #333;
+                border-radius: 12px; padding: 15px;
             }
             QPushButton {
-                background-color: #2a2a2a;
-                color: #ffffff;
-                border: 1px solid #444444;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-weight: 500;
+                background-color: #2a2a2a; color: #fff;
+                border: 1px solid #444; border-radius: 8px;
+                padding: 10px 20px; font-weight: 500;
             }
-            QPushButton:hover {
-                background-color: #3d3d3d;
-                border-color: #555555;
+            QPushButton:hover { background-color: #3d3d3d; border-color: #555; }
+            QPushButton#primaryBtn {
+                background-color: #4caf50; border-color: #4caf50; font-weight: bold;
             }
-            QPushButton#installBtn {
-                background-color: #4caf50;
-                border-color: #4caf50;
-                font-weight: bold;
+            QPushButton#primaryBtn:hover { background-color: #45a049; }
+            QPushButton#dangerBtn {
+                background-color: #c62828; border-color: #c62828;
             }
-            QPushButton#installBtn:hover {
-                background-color: #45a049;
-            }
+            QPushButton#dangerBtn:hover { background-color: #e53935; }
             QPushButton:disabled {
-                background-color: #1a1a1a;
-                color: #555555;
-                border: 1px solid #333333;
+                background-color: #1a1a1a; color: #555; border: 1px solid #333;
             }
             QGroupBox {
-                font-weight: bold;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                margin-top: 15px;
-                padding-top: 10px;
+                font-weight: bold; border: 1px solid #333;
+                border-radius: 8px; margin-top: 15px; padding-top: 10px;
             }
             QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-                color: #888888;
+                subcontrol-origin: margin; left: 10px; padding: 0 5px; color: #888;
             }
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
+            QScrollArea { border: none; background: transparent; }
             QScrollBar:vertical {
-                border: none;
-                background: #1a1a1a;
-                width: 10px;
-                margin: 0px;
+                border: none; background: #1a1a1a; width: 10px;
             }
             QScrollBar::handle:vertical {
-                background: #333333;
-                min-height: 20px;
-                border-radius: 5px;
+                background: #333; min-height: 20px; border-radius: 5px;
             }
             QProgressBar {
-                border: none;
-                background-color: #1a1a1a;
-                height: 8px;
-                border-radius: 4px;
-                text-align: center;
+                border: none; background-color: #1a1a1a; height: 8px;
+                border-radius: 4px; text-align: center;
             }
             QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
                     stop:0 #4ec9b0, stop:1 #5dd9c0);
                 border-radius: 4px;
             }
         """)
 
+    # ── UI Layout ──────────────────────────────────────────────────────
+
     def init_ui(self):
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.layout = QVBoxLayout(self.central_widget)
-        self.layout.setContentsMargins(30, 20, 30, 20)
-        self.layout.setSpacing(15)
-        
-        # Header with Logo
-        header_layout = QHBoxLayout()
-        
-        self.logo_label = QLabel()
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(30, 20, 30, 20)
+        root.setSpacing(15)
+
+        # Header
+        header = QHBoxLayout()
+        logo = QLabel()
         icon_path = os.path.join(get_base_dir(), "pstux_icon.png")
         if os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path)
-            self.logo_label.setPixmap(pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        header_layout.addWidget(self.logo_label)
-        
-        self.title_label = QLabel("Photoshop for Linux")
-        self.title_label.setObjectName("titleLabel")
-        header_layout.addWidget(self.title_label)
-        header_layout.addStretch()
-        
-        # Burger Menu
-        self.menu_btn = QPushButton("\u2630")
-        self.menu_btn.setFixedWidth(50)
-        self.menu_btn.setObjectName("menuBtn")
-        self.menu_btn.setToolTip("Menu")
-        
-        self.app_menu = QMenu(self)
-        self.app_menu.addAction("Help / Information", self.show_help)
-        self.app_menu.addAction("Export Log", self.save_log)
-        self.app_menu.addSeparator()
-        self.app_menu.addAction("About", lambda: QMessageBox.about(self, "About", "Photoshop for Linux v2.2-alpha\nCreated for Adobe Photoshop on Linux."))
-        
-        self.menu_btn.setMenu(self.app_menu)
-        header_layout.addWidget(self.menu_btn)
-        
-        self.layout.addLayout(header_layout)
+            logo.setPixmap(
+                QPixmap(icon_path).scaled(
+                    64, 64,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        header.addWidget(logo)
 
-        # Content Split (Controls Left + Status Right)
-        content_layout = QHBoxLayout()
-        
-        # LEFT Side: Controls (1/3 weight) - Wrapped in ScrollArea
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        
-        self.control_container = QWidget()
-        self.scroll_area.setWidget(self.control_container)
-        control_side = QVBoxLayout(self.control_container)
-        control_side.setContentsMargins(0, 0, 10, 0)
-        control_side.setSpacing(10)
-        
-        # Group 1: Quick Start
-        qs_group = QGroupBox("Quick Start")
-        qs_layout = QVBoxLayout(qs_group)
-        self.install_btn = QPushButton("One-Click Full Setup")
-        self.install_btn.setObjectName("installBtn")
-        self.install_btn.setToolTip("Performs all necessary steps automatically: System packages, Wine build, and Winetricks.")
-        self.install_btn.clicked.connect(self.start_installation)
-        qs_layout.addWidget(self.install_btn)
-        control_side.addWidget(qs_group)
+        title = QLabel("Photoshop for Linux")
+        title.setObjectName("titleLabel")
+        header.addWidget(title)
+        header.addStretch()
 
-        # Group 2: Installation
-        inst_group = QGroupBox("Installer & Apps")
-        inst_layout = QVBoxLayout(inst_group)
-        
-        installer_label = QLabel("Photoshop Installer (.exe):")
-        inst_layout.addWidget(installer_label)
-        
-        installer_path_layout = QHBoxLayout()
-        self.installer_path_edit = QLineEdit()
-        self.installer_path_edit.setPlaceholderText("No file selected...")
-        self.installer_path_edit.setReadOnly(True)
-        installer_path_layout.addWidget(self.installer_path_edit)
-        
-        self.select_exe_btn = QPushButton("...")
-        self.select_exe_btn.clicked.connect(self.select_installer_exe)
-        installer_path_layout.addWidget(self.select_exe_btn)
-        inst_layout.addLayout(installer_path_layout)
-        
-        self.run_installer_btn = QPushButton("Run Selected Installer")
-        self.run_installer_btn.clicked.connect(self.run_photoshop_installer)
-        inst_layout.addWidget(self.run_installer_btn)
-        
-        self.launch_ps_btn = QPushButton("Launch Photoshop")
-        self.launch_ps_btn.clicked.connect(self.launch_photoshop)
-        inst_layout.addWidget(self.launch_ps_btn)
-        
-        self.add_menu_btn = QPushButton("Add to Start Menu")
-        self.add_menu_btn.setToolTip("Creates a shortcut in your system's start menu.")
-        self.add_menu_btn.clicked.connect(self.add_to_start_menu)
-        inst_layout.addWidget(self.add_menu_btn)
-        
-        control_side.addWidget(inst_group)
+        menu_btn = QPushButton("\u2630")
+        menu_btn.setFixedWidth(50)
+        menu_btn.setObjectName("menuBtn")
+        app_menu = QMenu(self)
+        app_menu.addAction("Help", self.show_help)
+        app_menu.addAction("Export Log", self.save_log)
+        app_menu.addSeparator()
+        app_menu.addAction("About", lambda: QMessageBox.about(
+            self, "About",
+            "Photoshop for Linux v3.0\n"
+            "Wine 11.1 · Pre-compiled build\n"
+            "Community project – not affiliated with Adobe."
+        ))
+        menu_btn.setMenu(app_menu)
+        header.addWidget(menu_btn)
+        root.addLayout(header)
 
-        # Group 3: System Setup
-        sys_group = QGroupBox("System Setup")
-        sys_layout = QVBoxLayout(sys_group)
-        
-        self.setup_wine_btn = QPushButton("Build/Setup Patched Wine")
-        self.setup_wine_btn.setToolTip("Compiles a specifically patched Wine version for Adobe installers.")
-        self.setup_wine_btn.clicked.connect(self.setup_wine_environment)
-        sys_layout.addWidget(self.setup_wine_btn)
-        
-        self.install_deps_btn = QPushButton("Install System Packages")
-        self.install_deps_btn.setToolTip("Installs required Linux system packages (gcc, git, etc.).")
-        self.install_deps_btn.clicked.connect(self.install_missing_deps)
-        sys_layout.addWidget(self.install_deps_btn)
-        
-        self.winetricks_fix_btn = QPushButton("Install Winetricks Components")
-        self.winetricks_fix_btn.setToolTip("Installs necessary Windows DLLs like msxml3 and fonts.")
-        self.winetricks_fix_btn.clicked.connect(self.install_winetricks_deps)
-        sys_layout.addWidget(self.winetricks_fix_btn)
-        control_side.addWidget(sys_group)
+        # Body split
+        body = QHBoxLayout()
 
-        # Group 4: Maintenance
-        maint_group = QGroupBox("Maintenance / Fixes")
-        maint_layout = QVBoxLayout(maint_group)
-        
-        self.winecfg_btn = QPushButton("Open Wine Configuration")
-        self.winecfg_btn.setToolTip("Opens the standard Wine configuration tool.")
-        self.winecfg_btn.clicked.connect(self.open_winecfg)
-        maint_layout.addWidget(self.winecfg_btn)
-        
-        self.gpu_btn = QPushButton("Switch GPU Backend (Vulkan/GL)")
-        self.gpu_btn.setToolTip("Toggles between Vulkan (DXVK) and OpenGL. Vulkan is recommended.")
-        self.gpu_btn.clicked.connect(self.switch_gpu_backend)
-        maint_layout.addWidget(self.gpu_btn)
-        
-        self.ps_fixes_btn = QPushButton("Apply Photoshop Stability Fixes")
-        self.ps_fixes_btn.setToolTip("Applies registry tweaks and DLL overrides for Photoshop.")
-        self.ps_fixes_btn.clicked.connect(self.apply_ps_fixes)
-        maint_layout.addWidget(self.ps_fixes_btn)
-        
-        self.repair_btn = QPushButton("Deep Repair (Clean Components)")
-        self.repair_btn.setToolTip("Deletes specific Adobe cache folders (OOBE, etc.) for troubleshooting.")
-        self.repair_btn.clicked.connect(self.deep_repair)
-        maint_layout.addWidget(self.repair_btn)
+        # ─ LEFT: controls ─
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        ctrl_container = QWidget()
+        scroll.setWidget(ctrl_container)
+        ctrl = QVBoxLayout(ctrl_container)
+        ctrl.setContentsMargins(0, 0, 10, 0)
+        ctrl.setSpacing(10)
 
-        self.save_log_btn = QPushButton("Save Installation Log")
-        self.save_log_btn.setToolTip("Saves the entire installation log to a text file.")
-        self.save_log_btn.clicked.connect(self.save_log)
-        maint_layout.addWidget(self.save_log_btn)
-        
-        self.clean_prefix_btn = QPushButton("Delete Full Wine Prefix")
-        self.clean_prefix_btn.setToolTip("DELETES the entire Wine directory. All data will be lost!")
-        self.clean_prefix_btn.clicked.connect(self.clean_prefix)
-        maint_layout.addWidget(self.clean_prefix_btn)
-        control_side.addWidget(maint_group)
-        
-        control_side.addStretch()
-        content_layout.addWidget(self.scroll_area, 1)
+        # Quick Start
+        qs = QGroupBox("Quick Start")
+        qs_l = QVBoxLayout(qs)
+        self.setup_btn = QPushButton("One-Click Setup")
+        self.setup_btn.setObjectName("primaryBtn")
+        self.setup_btn.setToolTip(
+            "Initialize Wine prefix and install all required Windows components."
+        )
+        self.setup_btn.clicked.connect(self.one_click_setup)
+        self.setup_btn.setEnabled(False)
+        qs_l.addWidget(self.setup_btn)
+        ctrl.addWidget(qs)
 
-        # RIGHT Side: Status & Log (2/3 weight)
-        status_side = QVBoxLayout()
-        self.status_card = QFrame()
-        self.status_card.setObjectName("statusCard")
-        self.status_card_layout = QVBoxLayout(self.status_card)
-        
-        self.dep_label = QLabel("Checking system dependencies...")
+        # Installer & Apps
+        ia = QGroupBox("Installer && Apps")
+        ia_l = QVBoxLayout(ia)
+        ia_l.addWidget(QLabel("Photoshop Installer (.exe):"))
+        row = QHBoxLayout()
+        self.exe_edit = QLineEdit()
+        self.exe_edit.setPlaceholderText("No file selected...")
+        self.exe_edit.setReadOnly(True)
+        row.addWidget(self.exe_edit)
+        browse_btn = QPushButton("...")
+        browse_btn.setFixedWidth(40)
+        browse_btn.clicked.connect(self.browse_installer)
+        row.addWidget(browse_btn)
+        ia_l.addLayout(row)
+
+        self.run_inst_btn = QPushButton("Run Selected Installer")
+        self.run_inst_btn.clicked.connect(self.run_installer)
+        ia_l.addWidget(self.run_inst_btn)
+
+        self.launch_btn = QPushButton("Launch Photoshop")
+        self.launch_btn.clicked.connect(self.launch_photoshop)
+        ia_l.addWidget(self.launch_btn)
+
+        self.menu_entry_btn = QPushButton("Add to Start Menu")
+        self.menu_entry_btn.clicked.connect(self.add_to_start_menu)
+        ia_l.addWidget(self.menu_entry_btn)
+        ctrl.addWidget(ia)
+
+        # System Setup
+        ss = QGroupBox("System Setup")
+        ss_l = QVBoxLayout(ss)
+        self.deps_btn = QPushButton("Install System Packages")
+        self.deps_btn.setToolTip("Install winetricks and other runtime dependencies.")
+        self.deps_btn.clicked.connect(self.install_missing_deps)
+        ss_l.addWidget(self.deps_btn)
+
+        self.tricks_btn = QPushButton("Install Winetricks Components")
+        self.tricks_btn.setToolTip("Install Windows DLLs (msxml, vcrun, gdiplus, …).")
+        self.tricks_btn.clicked.connect(self.install_winetricks_only)
+        ss_l.addWidget(self.tricks_btn)
+        ctrl.addWidget(ss)
+
+        # Maintenance
+        mt = QGroupBox("Maintenance / Fixes")
+        mt_l = QVBoxLayout(mt)
+
+        btn_cfg = QPushButton("Open Wine Configuration")
+        btn_cfg.clicked.connect(self.open_winecfg)
+        mt_l.addWidget(btn_cfg)
+
+        btn_gpu = QPushButton("Switch GPU Backend (Vulkan / GL)")
+        btn_gpu.clicked.connect(self.switch_gpu_backend)
+        mt_l.addWidget(btn_gpu)
+
+        btn_fix = QPushButton("Apply Photoshop Stability Fixes")
+        btn_fix.clicked.connect(self.apply_ps_fixes)
+        mt_l.addWidget(btn_fix)
+
+        btn_repair = QPushButton("Deep Repair (Clean Caches)")
+        btn_repair.clicked.connect(self.deep_repair)
+        mt_l.addWidget(btn_repair)
+
+        btn_log = QPushButton("Save Installation Log")
+        btn_log.clicked.connect(self.save_log)
+        mt_l.addWidget(btn_log)
+
+        btn_nuke = QPushButton("Delete Full Wine Prefix")
+        btn_nuke.setObjectName("dangerBtn")
+        btn_nuke.clicked.connect(self.clean_prefix)
+        mt_l.addWidget(btn_nuke)
+        ctrl.addWidget(mt)
+
+        ctrl.addStretch()
+        body.addWidget(scroll, 1)
+
+        # ─ RIGHT: status & log ─
+        right = QVBoxLayout()
+        card = QFrame()
+        card.setObjectName("statusCard")
+        card_l = QVBoxLayout(card)
+
+        self.dep_label = QLabel("Checking dependencies...")
         self.dep_label.setWordWrap(True)
-        self.status_card_layout.addWidget(self.dep_label)
-        
+        card_l.addWidget(self.dep_label)
+
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output.setStyleSheet("background-color: #1a1a1a; border: none; color: #999999; font-family: monospace;")
-        self.status_card_layout.addWidget(self.log_output)
-        
-        status_side.addWidget(self.status_card)
-        
-        # Progress Bar Area in Status Side
-        self.progress_section = QFrame()
-        self.progress_layout = QVBoxLayout(self.progress_section)
+        self.log_output.setStyleSheet(
+            "background-color: #1a1a1a; border: none; "
+            "color: #999; font-family: monospace;"
+        )
+        card_l.addWidget(self.log_output)
+        right.addWidget(card)
+
+        pbar_frame = QFrame()
+        pbar_l = QVBoxLayout(pbar_frame)
         self.progress_label = QLabel("Ready")
-        self.progress_layout.addWidget(self.progress_label)
-        
+        pbar_l.addWidget(self.progress_label)
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
-        self.progress_layout.addWidget(self.progress_bar)
-        status_side.addWidget(self.progress_section)
-        
-        content_layout.addLayout(status_side, 2)
-        
-        self.layout.addLayout(content_layout)
-        self.apply_theme()
+        pbar_l.addWidget(self.progress_bar)
+        right.addWidget(pbar_frame)
+
+        body.addLayout(right, 2)
+        root.addLayout(body)
+
+    # ── Helpers ────────────────────────────────────────────────────────
+
+    def log(self, msg):
+        self.log_output.append(msg)
+
+    def log_ok(self, msg):
+        self.log(f"<font color='#4caf50'>{msg}</font>")
+
+    def log_err(self, msg):
+        self.log(f"<font color='#f44336'>{msg}</font>")
+
+    def _wine_env(self):
+        env = os.environ.copy()
+        env["WINEPREFIX"] = get_prefix_path()
+        wine = get_wine_binary()
+        if wine:
+            env["WINE"] = wine
+        return env
+
+    def _set_busy(self, busy, label="Working..."):
+        self.setup_btn.setEnabled(not busy)
+        self.run_inst_btn.setEnabled(not busy)
+        self.tricks_btn.setEnabled(not busy)
+        if busy:
+            self.progress_label.setText(label)
+        else:
+            self.progress_label.setText("Ready")
+
+    # ── Dependency check ──────────────────────────────────────────────
 
     def check_dependencies(self):
-        self.checker = DependencyChecker()
-        self.checker.status_signal.connect(self.update_deps_ui)
-        self.checker.start()
+        self._checker = DependencyChecker()
+        self._checker.status_signal.connect(self._on_deps_checked)
+        self._checker.start()
 
-    def update_deps_ui(self, results):
-        text = "<b>System Requirements Tracking:</b><br><br>"
+    def _on_deps_checked(self, results):
+        lines = ["<b>Runtime Requirements:</b><br>"]
         all_ok = True
-        for name, installed in results.items():
-            icon = "[OK]" if installed else "[MISSING]"
-            if not installed: all_ok = False
-            text += f"{icon} {name}<br>"
-        
-        self.dep_label.setText(text)
+        for name, ok in results.items():
+            icon = "\u2705" if ok else "\u274c"
+            lines.append(f"{icon} {name}<br>")
+            if not ok:
+                all_ok = False
+
         if all_ok:
-            self.install_btn.setEnabled(True)
-            self.dep_label.setText(text + "<br><font color='#4caf50'>All dependencies satisfied!</font>")
+            lines.append("<br><font color='#4caf50'>All requirements met!</font>")
+            self.setup_btn.setEnabled(True)
         else:
-            self.dep_label.setText(text + "<br><font color='#f44336'>Bitte fehlende Pakete nachinstallieren.</font>")
+            lines.append(
+                "<br><font color='#f44336'>Some requirements are missing. "
+                "Click 'Install System Packages' first.</font>"
+            )
+            self.setup_btn.setEnabled(False)
 
-    def run_photoshop_installer(self):
-        installer_path = self.installer_path_edit.text()
-        if not installer_path or installer_path == "No file selected...":
-            self.log_output.append("<font color='#f44336'>No installer selected!</font>")
+        self.dep_label.setText("".join(lines))
+
+    # ── One-Click Setup ───────────────────────────────────────────────
+
+    def one_click_setup(self):
+        wine = get_wine_binary()
+        if not wine:
+            self.log_err("Wine binary not found! Cannot proceed.")
             return
-            
-        prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = get_writable_wine_dir()
-        
-        self.log_output.append(f"Starte Installer aus: {installer_path}")
-        env = os.environ.copy()
-        env["WINEPREFIX"] = prefix_path
-        
-        def run():
-            try:
-                subprocess.check_call([wine_path, installer_path], env=env)
-            except Exception as e:
-                 print(f"Installer error: {e}")
-        
-        threading.Thread(target=run).start()
 
-    def launch_photoshop(self):
-        # Path logic for installed Photoshop usually in C:\Program Files\Adobe\Adobe Photoshop 2021\Photoshop.exe
-        prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = get_writable_wine_dir()
-        
-        ps_exe = Path(prefix_path) / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2021" / "Photoshop.exe"
-        
-        if not ps_exe.exists():
-            # Try 2025 path if 2021 not found
-            ps_exe = Path(prefix_path) / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2025" / "Photoshop.exe"
-            
-        if not ps_exe.exists():
-            self.log_output.append("<font color='#f44336'>Photoshop.exe not found. Is it installed already?</font>")
+        config = self._load_config()
+        if not config:
             return
-            
-        self.log_output.append("Launching Photoshop...")
-        env = os.environ.copy()
-        env["WINEPREFIX"] = prefix_path
-        threading.Thread(target=lambda: os.system(f"WINEPREFIX='{prefix_path}' '{wine_path}' '{ps_exe}'")).start()
 
-    def add_to_start_menu(self):
-        self.log_output.append("<b>Integrating Photoshop into start menu...</b>")
-        
-        try:
-            home = Path.home()
-            desktop_dir = home / ".local" / "share" / "applications"
-            icon_dir = home / ".local" / "share" / "icons"
-            
-            desktop_dir.mkdir(parents=True, exist_ok=True)
-            icon_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 1. Handle Icon
-            src_icon = os.path.join(get_base_dir(), "pstux_icon.png")
-            dest_icon = icon_dir / "pstux_photoshop_final.png"
-            if os.path.exists(src_icon):
-                shutil.copy(src_icon, dest_icon)
-                self.log_output.append(f"Icon copied to: {dest_icon}")
-            
-            # 2. Handle Executable Path for Installer
-            appimage_path = os.environ.get("APPIMAGE")
-            if appimage_path:
-                installer_cmd = appimage_path
-                launch_cmd = f"{appimage_path} --launch"
-            else:
-                installer_cmd = f"{sys.executable} {os.path.abspath(__file__)}"
-                launch_cmd = f"{sys.executable} {os.path.abspath(__file__)} --launch"
-            
-            # 3. Create Installer Desktop File
-            installer_desktop = desktop_dir / "pstux_photoshop_installer.desktop"
-            with open(installer_desktop, "w") as f:
-                f.write(f"""[Desktop Entry]
-Type=Application
-Name=Photoshop Installer & Maintenance
-Comment=Manage Adobe Photoshop on Linux
-Exec={installer_cmd}
-Icon={dest_icon}
-Terminal=false
-Categories=Graphics;Settings;
-""")
-            
-            # 4. Create Direct Photoshop Desktop File (if installed)
-            prefix_path = Path.home() / ".photoshop_cc2021"
-            ps_exe = prefix_path / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2021" / "Photoshop.exe"
-            
-            if ps_exe.exists():
-                app_desktop = desktop_dir / "pstux_photoshop_app.desktop"
-                with open(app_desktop, "w") as f:
-                    f.write(f"""[Desktop Entry]
-Type=Application
-Name=Adobe Photoshop
-Comment=Powerful image editor
-Exec={launch_cmd}
-Icon={dest_icon}
-Terminal=false
-Categories=Graphics;
-""")
-                os.chmod(app_desktop, 0o755)
-                self.log_output.append("<font color='#4caf50'>Direct Photoshop launcher created!</font>")
+        self._set_busy(True, "Setting up Wine environment...")
+        self.progress_bar.setValue(0)
+        self.log("<b>Starting One-Click Setup...</b>")
 
-            os.chmod(installer_desktop, 0o755)
-            self.log_output.append(f"<font color='#4caf50'>Successfully added to start menu!</font>")
-            QMessageBox.information(self, "Success", "Photoshop and the Installer have been added to your start menu!")
-            
-        except Exception as e:
-            self.log_output.append(f"<font color='#f44336'>System integration error: {e}</font>")
-            QMessageBox.critical(self, "Error", f"Integration failed: {e}")
-
-    def install_winetricks_deps(self):
-        self.log_output.append("<b>Installiere Winetricks-Komponenten...</b>")
-        self.setup_wine_environment() # Re-runs setup which includes winetricks
-
-    def open_winecfg(self):
-        prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = get_writable_wine_dir()
-        self.log_output.append("Opening winecfg...")
-        env = os.environ.copy()
-        env["WINEPREFIX"] = prefix_path
-        threading.Thread(target=lambda: subprocess.run([wine_path, "winecfg"], env=env)).start()
-
-    def switch_gpu_backend(self):
-        prefix_path = str(Path.home() / ".photoshop_cc2021")
-        env = os.environ.copy()
-        env["WINEPREFIX"] = prefix_path
-        
-        # Simple toggle logic or dialog
-        self.log_output.append("<b>Schalte GPU-Backend um...</b>")
-        try:
-            # We use winetricks to set the renderer
-            # renderer=vulkan (DXVK/vkd3d) or renderer=gdi (OpenGL)
-            # For simplicity, we toggle to Vulkan as default and offer GL as fallback
-            self.log_output.append("Setze Renderer auf Vulkan (DXVK)...")
-            subprocess.check_call(["winetricks", "renderer=vulkan"], env=env)
-            self.log_output.append("<font color='#4caf50'>Vulkan-Backend (DXVK) aktiviert.</font>")
-        except Exception as e:
-            self.log_output.append(f"Fehler beim Umschalten: {e}")
-
-    def apply_ps_fixes(self):
-        prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = get_writable_wine_dir()
-        env = os.environ.copy()
-        env["WINEPREFIX"] = prefix_path
-
-        self.log_output.append("<b>Applying Photoshop stability fixes...</b>")
-        
-        fixes = [
-            ("atmlib", "native"),
-            ("gdiplus", "builtin,native"),
-            ("riched20", "builtin,native")
-        ]
-        
-        try:
-            for dll, mode in fixes:
-                self.log_output.append(f"Setting override for {dll} ({mode})...")
-                subprocess.check_call([wine_path, "reg", "add", "HKEY_CURRENT_USER\\Software\\Wine\\AppDefaults\\Photoshop.exe\\DllOverrides", "/v", dll, "/t", "REG_SZ", "/d", mode, "/f"], env=env)
-            
-            # Disable Home Screen (Registry)
-            self.log_output.append("Deaktiviere Photoshop Home Screen...")
-            reg_path = "HKEY_CURRENT_USER\\Software\\Adobe\\Photoshop\\150.0" # Example version path
-            subprocess.check_call([wine_path, "reg", "add", reg_path, "/v", "InAppMsg_CanShowHomeScreen", "/t", "REG_DWORD", "/d", "0", "/f"], env=env)
-            
-            self.log_output.append("<font color='#4caf50'>Alle Fixes erfolgreich angewendet!</font>")
-        except Exception as e:
-            self.log_output.append(f"Fehler beim Anwenden der Fixes: {e}")
-
-    def deep_repair(self):
-        # Cleans only specific problematic folders instead of the whole prefix
-        prefix_path = Path.home() / ".photoshop_cc2021"
-        if not prefix_path.exists():
-            self.log_output.append("Prefix does not exist. Nothing to repair.")
-            return
-            
-        self.log_output.append("<b>Starting Deep Repair...</b>")
-        paths_to_clean = [
-            prefix_path / "drive_c" / "users" / os.environ.get("USER", "wineuser") / "AppData" / "Local" / "Adobe" / "OOBE",
-            prefix_path / "drive_c" / "Program Files (x86)" / "Common Files" / "Adobe" / "SLCache",
-            prefix_path / "drive_c" / "ProgramData" / "Adobe" / "SLStore"
-        ]
-        
-        for p in paths_to_clean:
-            if p.exists():
-                self.log_output.append(f"Cleaning cache: {p.name}...")
-                shutil.rmtree(p)
-        
-        self.log_output.append("<font color='#4caf50'>Deep Repair finished. Please try installing again.</font>")
-
-    def clean_prefix(self):
-        prefix_path = Path.home() / ".photoshop_cc2021"
-        if prefix_path.exists():
-            self.log_output.append(f"Deleting Wine prefix at {prefix_path}...")
-            shutil.rmtree(prefix_path)
-            self.log_output.append("Prefix deleted.")
-        else:
-            self.log_output.append("Prefix does not exist.")
-
-    def save_log(self):
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Log File", "install_log.txt", "Text Files (*.txt);;All Files (*)"
+        self._setup_thread = WineSetupThread(
+            get_prefix_path(), wine, config.get("winetricks", [])
         )
-        if file_path:
-            try:
-                with open(file_path, "w") as f:
-                    f.write(self.log_output.toPlainText())
-                self.log_output.append(f"<font color='#4caf50'>Log erfolgreich gespeichert unter: {file_path}</font>")
-            except Exception as e:
-                self.log_output.append(f"<font color='#f44336'>Fehler beim Speichern des Logs: {e}</font>")
+        self._setup_thread.log_signal.connect(self.log)
+        self._setup_thread.progress_signal.connect(self.progress_bar.setValue)
+        self._setup_thread.finished_signal.connect(self._on_setup_finished)
+        self._setup_thread.start()
 
-    def show_help(self):
-        help_text = """
-        <h2>Photoshop for Linux - Help</h2>
-        <p><b>Quick Start:</b><br>
-        - <i>One-Click Full Setup:</i> Installs everything automatically (recommended).</p>
-        
-        <p><b>System Setup:</b><br>
-        - <i>Build Patched Wine:</i> Compiles Wine with special fixes for Adobe installers.<br>
-        - <i>Install System Packages:</i> Installs Linux tools like gcc, git, and winetricks.<br>
-        - <i>Install Winetricks Components:</i> Installs Windows DLLs (msxml, fonts) into the prefix.</p>
-        
-        <p><b>Maintenance / Fixes:</b><br>
-        - <i>Switch GPU Backend:</i> Toggles between Vulkan (faster) and OpenGL (more compatible).<br>
-        - <i>Apply Stability Fixes:</i> Applies registry tweaks (e.g., disable Home Screen).<br>
-        - <i>Deep Repair:</i> Deletes only Adobe metadata/caches if login gets stuck.<br>
-        - <i>Delete Full Wine Prefix:</i> Resets everything completely (Caution: data loss).</p>
-        """
-        QMessageBox.information(self, "Information & Help", help_text)
-
-    def select_installer_exe(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Photoshop Installer", "", "Executables (*.exe);;All Files (*)"
-        )
-        if file_path:
-            self.installer_path_edit.setText(file_path)
-            self.log_output.append(f"Selected installer: {file_path}")
-
-    def setup_wine_environment(self):
-        self.log_output.append("<b>Starting Wine environment setup...</b>")
-        self.progress_bar.setValue(5)
-        
-        # Load config
-        try:
-            config_path = os.path.join(get_base_dir(), "version_configs.json")
-            with open(config_path, "r") as f:
-                config = json.load(f)["cc2021"]
-        except Exception as e:
-            self.log_output.append(f"Error loading configuration: {e}")
-            return
-
-        prefix_path = str(Path.home() / ".photoshop_cc2021")
-        wine_path = get_writable_wine_dir()
-        
-        if not os.path.exists(wine_path):
-            self.log_output.append("<font color='#f44336'>Wine has not been compiled yet. Please run 'One-Click Full Setup' first.</font>")
-            return
-
-        self.env_thread = WineEnvironmentThread(prefix_path, wine_path, config["winetricks"])
-        self.env_thread.log_signal.connect(self.log_output.append)
-        self.env_thread.progress_signal.connect(self.progress_bar.setValue)
-        self.env_thread.finished_signal.connect(self.on_installation_finished)
-        self.env_thread.start()
-
-    def start_installation(self):
-        self.log_output.append("<b>Initial installation started...</b>")
-        self.install_btn.setEnabled(False)
-        self.progress_bar.setValue(5)
-        
-        # Determine source path (READ-ONLY in AppImage)
-        ro_source_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns")
-        
-        # Determine destination path (WRITABLE user directory)
-        dest_path = str(Path.home() / ".local" / "share" / "photoshop-installer" / "wine-src")
-        
-        self.log_output.append(f"Source: {ro_source_path}")
-        self.log_output.append(f"Build Dir: {dest_path}")
-        
-        self.build_thread = WineBuildThread(ro_source_path)
-        self.build_thread.set_build_dir(dest_path) # Pass the writable location
-        self.build_thread.log_signal.connect(self.log_output.append)
-        self.build_thread.progress_signal.connect(self.progress_bar.setValue)
-        self.build_thread.finished_signal.connect(self.on_installation_finished)
-        self.build_thread.start()
-
-    def on_installation_finished(self, success):
+    def _on_setup_finished(self, success):
+        self._set_busy(False)
         if success:
             self.progress_bar.setValue(100)
-            self.log_output.append("<font color='#4caf50'><b>Installation completed successfully!</b></font>")
+            self.log_ok("<b>Setup completed!</b> You can now run the Photoshop installer.")
         else:
-            self.log_output.append("<font color='#f44336'><b>Installation failed.</b></font>")
-        self.install_btn.setEnabled(True)
+            self.log_err("<b>Setup failed.</b> Check the log above for details.")
+
+    # ── Installer execution ───────────────────────────────────────────
+
+    def browse_installer(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Photoshop Installer", "",
+            "Executables (*.exe);;All Files (*)"
+        )
+        if path:
+            self.exe_edit.setText(path)
+            self.log(f"Selected: {path}")
+
+    def run_installer(self):
+        exe = self.exe_edit.text().strip()
+        if not exe or not os.path.isfile(exe):
+            self.log_err("No valid installer file selected.")
+            return
+
+        wine = get_wine_binary()
+        if not wine:
+            self.log_err("Wine binary not found!")
+            return
+
+        self._set_busy(True, "Running installer...")
+        self._runner = InstallerRunnerThread(wine, get_prefix_path(), exe)
+        self._runner.log_signal.connect(self.log)
+        self._runner.finished_signal.connect(self._on_installer_finished)
+        self._runner.start()
+
+    def _on_installer_finished(self, success):
+        self._set_busy(False)
+        if success:
+            self.log_ok("Installer finished. Try 'Launch Photoshop'.")
+        else:
+            self.log_err("Installer process reported an error.")
+
+    # ── Launch Photoshop ──────────────────────────────────────────────
+
+    def _find_photoshop_exe(self):
+        prefix = Path(get_prefix_path())
+        candidates = [
+            prefix / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2025" / "Photoshop.exe",
+            prefix / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2024" / "Photoshop.exe",
+            prefix / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2021" / "Photoshop.exe",
+        ]
+        for p in candidates:
+            if p.exists():
+                return str(p)
+        # Glob fallback
+        for match in sorted(prefix.glob("drive_c/Program Files/Adobe/*/Photoshop.exe"), reverse=True):
+            return str(match)
+        return None
+
+    def launch_photoshop(self):
+        wine = get_wine_binary()
+        if not wine:
+            self.log_err("Wine binary not found!")
+            return
+
+        ps = self._find_photoshop_exe()
+        if not ps:
+            self.log_err(
+                "Photoshop.exe not found in prefix. "
+                "Have you run the installer yet?"
+            )
+            return
+
+        self.log(f"Launching Photoshop: {ps}")
+        env = self._wine_env()
+        try:
+            subprocess.Popen(
+                [wine, ps],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self.log_ok("Photoshop process started.")
+        except Exception as e:
+            self.log_err(f"Failed to launch: {e}")
+
+    # ── Start Menu ────────────────────────────────────────────────────
+
+    def add_to_start_menu(self):
+        try:
+            home = Path.home()
+            app_dir = home / ".local" / "share" / "applications"
+            icon_dir = home / ".local" / "share" / "icons"
+            app_dir.mkdir(parents=True, exist_ok=True)
+            icon_dir.mkdir(parents=True, exist_ok=True)
+
+            src_icon = os.path.join(get_base_dir(), "pstux_icon.png")
+            dest_icon = str(icon_dir / "photoshop-linux.png")
+            if os.path.isfile(src_icon):
+                shutil.copy2(src_icon, dest_icon)
+
+            appimage = os.environ.get("APPIMAGE")
+            if appimage:
+                exec_installer = appimage
+                exec_launch = f"{appimage} --launch"
+            else:
+                script = os.path.abspath(__file__)
+                exec_installer = f"{sys.executable} {script}"
+                exec_launch = f"{sys.executable} {script} --launch"
+
+            # Installer entry
+            installer_desktop = app_dir / "photoshop-installer.desktop"
+            installer_desktop.write_text(
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                "Name=Photoshop Installer & Maintenance\n"
+                "Comment=Manage Adobe Photoshop on Linux\n"
+                f"Exec={exec_installer}\n"
+                f"Icon={dest_icon}\n"
+                "Terminal=false\n"
+                "Categories=Graphics;Settings;\n"
+            )
+            installer_desktop.chmod(0o644)
+
+            # Direct launch entry (only if installed)
+            ps = self._find_photoshop_exe()
+            if ps:
+                launch_desktop = app_dir / "photoshop-app.desktop"
+                launch_desktop.write_text(
+                    "[Desktop Entry]\n"
+                    "Type=Application\n"
+                    "Name=Adobe Photoshop\n"
+                    "Comment=Image editing via Wine\n"
+                    f"Exec={exec_launch}\n"
+                    f"Icon={dest_icon}\n"
+                    "Terminal=false\n"
+                    "Categories=Graphics;\n"
+                )
+                launch_desktop.chmod(0o644)
+                self.log_ok("Photoshop launcher added to start menu.")
+
+            self.log_ok("Installer shortcut added to start menu.")
+            QMessageBox.information(self, "Done", "Start menu entries created!")
+
+        except Exception as e:
+            self.log_err(f"Failed to create menu entries: {e}")
+
+    # ── System Packages ───────────────────────────────────────────────
 
     def install_missing_deps(self):
         distro = detect_distro()
-        self.log_output.append(f"Distro detected: {distro}")
-        
-        pkgs_debian = ["gcc", "flex", "bison", "make", "git", "libx11-dev", "python3-pyqt6", "libxcb-cursor0"]
-        pkgs_arch = ["base-devel", "git", "libx11", "python-pyqt6", "winetricks"]
-        pkgs_fedora = ["gcc", "flex", "bison", "make", "git", "libX11-devel", "python3-pyqt6", "winetricks"]
-        pkgs_suse = ["gcc", "flex", "bison", "make", "git", "libX11-devel", "python3-qt6", "winetricks"]
+        self.log(f"Detected distribution family: <b>{distro}</b>")
 
-        if distro == "debian":
-            cmd = f"pkexec apt update && pkexec apt install -y {' '.join(pkgs_debian)}"
-        elif distro == "arch":
-            cmd = f"pkexec pacman -S --noconfirm {' '.join(pkgs_arch)}"
-        elif distro == "fedora":
-            cmd = f"pkexec dnf install -y {' '.join(pkgs_fedora)}"
-        elif distro == "suse":
-            cmd = f"pkexec zypper install -y {' '.join(pkgs_suse)}"
-        else:
-            self.log_output.append("Manual installation required for this distribution.")
+        pkg_map = {
+            "debian": "sudo apt update && sudo apt install -y winetricks libxcb-cursor0",
+            "arch": "sudo pacman -S --noconfirm winetricks",
+            "fedora": "sudo dnf install -y winetricks",
+            "suse": "sudo zypper install -y winetricks",
+        }
+        cmd = pkg_map.get(distro)
+        if not cmd:
+            self.log_err(
+                f"Unsupported distro '{distro}'. "
+                "Please install 'winetricks' manually."
+            )
             return
 
-        self.log_output.append(f"Starting package installation: {cmd}")
-        threading.Thread(target=lambda: os.system(cmd)).start()
-        # Re-check after a bit
-        QTimer.singleShot(5000, self.check_dependencies)
+        self.log(f"Running: {cmd}")
+        self._set_busy(True, "Installing packages...")
+
+        def _worker():
+            try:
+                subprocess.run(cmd, shell=True, check=True)
+            except Exception as e:
+                print(f"Package install error: {e}")
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        def _recheck():
+            if t.is_alive():
+                QTimer.singleShot(2000, _recheck)
+            else:
+                self._set_busy(False)
+                self.check_dependencies()
+                self.log("Dependency check refreshed.")
+
+        QTimer.singleShot(2000, _recheck)
+
+    # ── Winetricks only ───────────────────────────────────────────────
+
+    def install_winetricks_only(self):
+        wine = get_wine_binary()
+        if not wine:
+            self.log_err("Wine binary not found!")
+            return
+        if not shutil.which("winetricks"):
+            self.log_err("winetricks is not installed. Use 'Install System Packages' first.")
+            return
+
+        config = self._load_config()
+        if not config:
+            return
+
+        self._set_busy(True, "Installing winetricks components...")
+        self.progress_bar.setValue(0)
+        self._wt_thread = WineSetupThread(
+            get_prefix_path(), wine, config.get("winetricks", [])
+        )
+        self._wt_thread.log_signal.connect(self.log)
+        self._wt_thread.progress_signal.connect(self.progress_bar.setValue)
+        self._wt_thread.finished_signal.connect(self._on_setup_finished)
+        self._wt_thread.start()
+
+    # ── Wine Config ───────────────────────────────────────────────────
+
+    def open_winecfg(self):
+        wine = get_wine_binary()
+        if not wine:
+            self.log_err("Wine binary not found!")
+            return
+        self.log("Opening winecfg...")
+        env = self._wine_env()
+        subprocess.Popen(
+            [wine, "winecfg"], env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
+    # ── GPU Backend ───────────────────────────────────────────────────
+
+    def switch_gpu_backend(self):
+        if not shutil.which("winetricks"):
+            self.log_err("winetricks not found. Install it first.")
+            return
+        env = self._wine_env()
+        self.log("Setting renderer to Vulkan (DXVK)...")
+        try:
+            subprocess.run(
+                ["winetricks", "renderer=vulkan"], env=env,
+                capture_output=True, text=True, timeout=30,
+            )
+            self.log_ok("Vulkan backend activated.")
+        except Exception as e:
+            self.log_err(f"Failed to switch backend: {e}")
+
+    # ── Stability Fixes ───────────────────────────────────────────────
+
+    def apply_ps_fixes(self):
+        wine = get_wine_binary()
+        if not wine:
+            self.log_err("Wine binary not found!")
+            return
+
+        env = self._wine_env()
+        self.log("<b>Applying Photoshop stability fixes...</b>")
+
+        overrides = [
+            ("atmlib", "native"),
+            ("gdiplus", "builtin,native"),
+            ("riched20", "builtin,native"),
+        ]
+        try:
+            for dll, mode in overrides:
+                self.log(f"  DLL override: {dll} → {mode}")
+                subprocess.run(
+                    [wine, "reg", "add",
+                     r"HKCU\Software\Wine\AppDefaults\Photoshop.exe\DllOverrides",
+                     "/v", dll, "/t", "REG_SZ", "/d", mode, "/f"],
+                    env=env, capture_output=True, timeout=15,
+                )
+
+            self.log("  Disabling Photoshop Home Screen...")
+            for ver in ("150.0", "160.0", "170.0"):
+                subprocess.run(
+                    [wine, "reg", "add",
+                     rf"HKCU\Software\Adobe\Photoshop\{ver}",
+                     "/v", "InAppMsg_CanShowHomeScreen",
+                     "/t", "REG_DWORD", "/d", "0", "/f"],
+                    env=env, capture_output=True, timeout=15,
+                )
+
+            self.log_ok("All stability fixes applied.")
+        except Exception as e:
+            self.log_err(f"Fix error: {e}")
+
+    # ── Deep Repair ───────────────────────────────────────────────────
+
+    def deep_repair(self):
+        prefix = Path(get_prefix_path())
+        if not prefix.exists():
+            self.log("Prefix does not exist, nothing to repair.")
+            return
+
+        reply = QMessageBox.question(
+            self, "Confirm Deep Repair",
+            "This will delete Adobe caches (OOBE, SLCache, SLStore).\n"
+            "Photoshop itself will NOT be removed.\n\nContinue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        user = os.environ.get("USER", "wineuser")
+        targets = [
+            prefix / "drive_c" / "users" / user / "AppData" / "Local" / "Adobe" / "OOBE",
+            prefix / "drive_c" / "Program Files (x86)" / "Common Files" / "Adobe" / "SLCache",
+            prefix / "drive_c" / "ProgramData" / "Adobe" / "SLStore",
+        ]
+        self.log("<b>Deep Repair – cleaning caches...</b>")
+        for p in targets:
+            if p.exists():
+                self.log(f"  Removing: {p.name}")
+                shutil.rmtree(p, ignore_errors=True)
+        self.log_ok("Deep repair finished.")
+
+    # ── Delete Prefix ─────────────────────────────────────────────────
+
+    def clean_prefix(self):
+        prefix = Path(get_prefix_path())
+        if not prefix.exists():
+            self.log("Prefix does not exist.")
+            return
+
+        reply = QMessageBox.warning(
+            self, "Delete Wine Prefix",
+            f"This will PERMANENTLY delete:\n{prefix}\n\n"
+            "All installed applications and data will be lost!\n\nContinue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.log(f"Deleting prefix: {prefix}")
+        shutil.rmtree(prefix, ignore_errors=True)
+        self.log_ok("Wine prefix deleted.")
+
+    # ── Save Log ──────────────────────────────────────────────────────
+
+    def save_log(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Log", "photoshop_install_log.txt",
+            "Text Files (*.txt);;All Files (*)"
+        )
+        if path:
+            try:
+                with open(path, "w") as f:
+                    f.write(self.log_output.toPlainText())
+                self.log_ok(f"Log saved: {path}")
+            except Exception as e:
+                self.log_err(f"Failed to save log: {e}")
+
+    # ── Help ──────────────────────────────────────────────────────────
+
+    def show_help(self):
+        QMessageBox.information(self, "Help", (
+            "<h2>Photoshop for Linux – Help</h2>"
+            "<p><b>One-Click Setup:</b> Initializes Wine prefix and installs "
+            "required Windows components (recommended first step).</p>"
+            "<p><b>Run Selected Installer:</b> Runs the Photoshop .exe installer "
+            "inside the prepared Wine environment.</p>"
+            "<p><b>Launch Photoshop:</b> Starts Photoshop directly.</p>"
+            "<hr>"
+            "<p><b>Maintenance:</b></p>"
+            "<ul>"
+            "<li><i>Switch GPU Backend</i> – Vulkan (faster) or OpenGL (more compatible)</li>"
+            "<li><i>Stability Fixes</i> – DLL overrides and registry tweaks</li>"
+            "<li><i>Deep Repair</i> – Removes Adobe caches if login is stuck</li>"
+            "<li><i>Delete Prefix</i> – Full reset (caution: all data lost)</li>"
+            "</ul>"
+        ))
+
+    # ── Config loader ─────────────────────────────────────────────────
+
+    def _load_config(self):
+        try:
+            cfg_path = os.path.join(get_base_dir(), "version_configs.json")
+            with open(cfg_path, "r") as f:
+                data = json.load(f)
+            # Use the first available config
+            for key in ("cc2025", "cc2021"):
+                if key in data:
+                    return data[key]
+            self.log_err("No valid version config found.")
+            return None
+        except Exception as e:
+            self.log_err(f"Failed to load config: {e}")
+            return None
+
+
+# ---------------------------------------------------------------------------
+# Direct launch mode (--launch)
+# ---------------------------------------------------------------------------
+
+def direct_launch():
+    """Launch Photoshop without showing the GUI."""
+    wine = get_wine_binary()
+    if not wine:
+        print("ERROR: Wine binary not found.")
+        sys.exit(1)
+
+    prefix = Path(get_prefix_path())
+    candidates = sorted(prefix.glob("drive_c/Program Files/Adobe/*/Photoshop.exe"), reverse=True)
+    if not candidates:
+        print("ERROR: Photoshop.exe not found in prefix.")
+        print(f"Prefix: {prefix}")
+        sys.exit(1)
+
+    ps = str(candidates[0])
+    print(f"Launching: {ps}")
+    env = os.environ.copy()
+    env["WINEPREFIX"] = str(prefix)
+    os.execvpe(wine, [wine, ps], env)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Force High-DPI Scaling for modern displays
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"
-    
-    # Check for --launch flag
     if "--launch" in sys.argv:
-        # Dummy app for path resolution if needed
-        # We don't need a full QApplication for launch if we just use os.system, 
-        # but the code imports QMainWindow.
-        pass # Handle launch logic if strictly needed, but current launch_photoshop uses QThread which needs app loop or just running thread.
-             # The previous logic had a sys.exit(0) which might skip actual launch if not handled carefully.
-             # Ideally launch should be robust.
-    
-    # Check for CLI build flag for debugging
-    if "--build-cli" in sys.argv:
-        from PyQt6.QtCore import QCoreApplication
-        app = QCoreApplication(sys.argv)
-        
-        print("Starting CLI Build Mode...")
-        
-        # Setup paths as in GUI
-        ro_source_path = os.path.join(get_base_dir(), "wine-adobe-installers-fix-dropdowns")
-        dest_path = str(Path.home() / ".local" / "share" / "photoshop-installer" / "wine-src")
-        
-        print(f"Source: {ro_source_path}")
-        print(f"Destination: {dest_path}")
-        
-        builder = WineBuildThread(ro_source_path)
-        builder.set_build_dir(dest_path)
-        
-        # Connect signals to print
-        builder.log_signal.connect(lambda s: print(f"[LOG] {s}"))
-        builder.progress_signal.connect(lambda p: print(f"[PROGRESS] {p}%"))
-        builder.finished_signal.connect(lambda s: print(f"[FINISHED] Success: {s}") or app.quit())
-        
-        builder.start()
-        sys.exit(app.exec())
+        direct_launch()
+        sys.exit(0)
 
-    if "--launch" in sys.argv:
-         # Simplified launch for now to match previous behavior logic but maybe better
-         # Just run the installer GUI for now if arguments are ambiguous, or fix the launch logic.
-         # The original code had:
-         # installer = PhotoshopInstallerGUI(); installer.launch_photoshop(); sys.exit(0)
-         # But launch_photoshop starts a thread and returns. So sys.exit(0) kills it immediately.
-         # Let's fix that too while we are here if needed, but primary focus is build-cli.
-         pass
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 
     app = QApplication(sys.argv)
     window = PhotoshopInstallerGUI()
