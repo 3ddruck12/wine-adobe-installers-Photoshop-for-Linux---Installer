@@ -168,8 +168,9 @@ bash build_appimage.sh
 ```
 
 The build script:
-1. **Compiles Wine 11.1** from source with `--enable-win64 --disable-tests` (cached after first build)
-2. **Bundles** the Wine runtime, standalone Python, PyQt6, and the installer script
+1. **Compiles Wine 11.1** from source with `--enable-win64 --disable-tests`
+2. **Automatically applies Adobe-specific patches** from the `wine-patches/` directory (included in this repo)
+3. **Bundles** the Wine runtime, standalone Python, PyQt6, and the installer script
 3. **Generates** `Photoshop_Installer_x86_64.AppImage`
 
 > **Note:** The first build takes **20–40 minutes** (Wine compilation). Subsequent builds reuse the cached Wine build and finish in under a minute.

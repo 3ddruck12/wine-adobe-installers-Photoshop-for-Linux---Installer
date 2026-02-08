@@ -82,6 +82,12 @@ else
     echo "Copying Wine source to temp build location..."
     cp -a "$PROJECT_DIR/$WINE_SOURCE/." "$WINE_BUILD_BASE/src/"
 
+    # Apply Adobe Photoshop patches if they exist
+    if [ -d "$PROJECT_DIR/wine-patches" ]; then
+        echo "Applying Adobe Photoshop patches from wine-patches/..."
+        cp -af "$PROJECT_DIR/wine-patches/." "$WINE_BUILD_BASE/src/"
+    fi
+
     (
         cd "$WINE_BUILD_BASE/build"
 
