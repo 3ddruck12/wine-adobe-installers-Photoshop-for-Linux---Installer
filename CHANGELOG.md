@@ -3,16 +3,7 @@
 ## v3.06-alpha (2026-02-08)
 
 ### ✨ Features
-- **MSHTML Improvements:**
-  - Ported `IXMLSerializer` and global `XMLSerializer` constructor.
-  - Implemented automatic string-to-function compilation for event handlers (e.g., `onclick`).
-  - Added proprietary `IEnumVARIANT` iterator for `childNodes` collection.
-  - Fixed JavaScript dispatch issues for dynamic elements.
-- **MSXML3 Fixes:**
-  - Corrected CDATA wrapping and empty string handling in `domdoc.c`.
-- **Infrastructure:**
-  - Bundled a fully patched Wine 11.1 and WoW64 runtime in the AppImage.
-
+- *
 ## v3.05-alpha (2026-02-06)
 
 ### ✨ Features (Top 5)
@@ -256,3 +247,12 @@ Kompletter Rewrite des Projekts: Wine 11.1 als vorkompiliertes Bundle, kein Buil
 | `AppRun` | Wird beim Build generiert | 10 → 13 |
 | `photoshop.desktop` | Wird beim Build generiert | 6 → 7 |
 | `PhotoshopInstaller.py.bak` | Backup der alten Version | – |
+*MSHTML Improvements:**
+  - Ported `IXMLSerializer` and global `XMLSerializer` constructor.
+  - Implemented automatic string-to-function compilation for event handlers (e.g., `onclick`).
+  - Added proprietary `IEnumVARIANT` iterator for `childNodes` collection.
+  - Fixed JavaScript dispatch issues for dynamic elements.
+- **MSXML3 Fixes:**
+  - Corrected CDATA wrapping and empty string handling in `domdoc.c`.
+- **Infrastructure:**
+  - Bundled a fully patched Wine 11.1 and WoW64 runtime in the AppImage.
