@@ -28,6 +28,7 @@ wine-11.1-build/
 
 # Photoshop Repository (do NOT commit — large external repo)
 Photoshop Repo/
+!Photoshop Repo/ADOBE_PATCHES_PORT_PLAN.md
 
 # Local configuration
 pstux_icon_raw.png
