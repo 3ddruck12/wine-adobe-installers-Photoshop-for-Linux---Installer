@@ -1,7 +1,7 @@
 #!/bin/bash
 # build_appimage.sh - Build Photoshop Installer AppImage with pre-compiled Wine 11.1
 # Licensed under GNU GPL v3.0
-# Copyright (C) 2026 Jens (3ddruck12)
+# Copyright (C) 2026  (3ddruck12)
 #
 # Prerequisites:
 #   - python-standalone.tar.gz  (from https://github.com/indygreg/python-build-standalone)

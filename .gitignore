@@ -26,6 +26,9 @@ wine-adobe-installers-fix-dropdowns/
 # Wine build output (cached, ~3GB)
 wine-11.1-build/
 
+# Photoshop Repository (do NOT commit — large external repo)
+Photoshop Repo/
+
 # Local configuration
 pstux_icon_raw.png
 version_configs.json.bak

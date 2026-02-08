@@ -225,7 +225,7 @@ AppImage
 - **[Affinity on Linux](https://github.com/ryzendew/Linux-Affinity-Installer)** — Original UI inspiration.
 - **Wine Project** — The compatibility layer that makes this possible.
 - **The Linux Community** — Continuous improvements to Wine, AppImage, and related tools.
-
+- **wine-adobe-installers** PhialsBasement **(https://github.com/PhialsBasement/wine-adobe-installers)**
 ---
 
 *Disclaimer: This project is not affiliated with Adobe Inc. Adobe Photoshop is a registered trademark of Adobe Inc. You must own a valid license from Adobe to use this software. This project provides only a compatibility layer (Wine) and scripts to facilitate the installation of legitimate software on Linux. It does not contain any Adobe software, cracks, or means to bypass copy protection.*
