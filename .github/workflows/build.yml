@@ -37,7 +37,12 @@ jobs:
 
       - name: Prepare Python
         run: |
-          wget -O python-standalone.tar.gz https://github.com/indygreg/python-build-standalone/releases/download/20240107/cpython-3.11.7+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz
+          wget -O python-standalone.tar.gz https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.12.3+20240415-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz
+
+      - name: Download Wine source
+        run: |
+          wget https://dl.winehq.org/wine/source/11.x/wine-11.1.tar.xz
+          tar -xf wine-11.1.tar.xz
 
       - name: Build AppImage
         run: |
@@ -46,7 +51,7 @@ jobs:
           # Link them to match build_appimage.sh
           ln -sf linuxdeploy-extracted/AppRun linuxdeploy
           ln -sf appimagetool-extracted/AppRun appimagetool
-          # ./build_appimage.sh
+          bash build_appimage.sh
 
       - name: Release
         uses: softprops/action-gh-release@v1
