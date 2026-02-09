@@ -497,16 +497,16 @@ static dispex_static_data_t dom_parser_ctor_dispex = {
      return hres;
  }
  
- static const IXMLSerializerVtbl xml_serializer_vtbl = {
-     xml_serializer_QueryInterface,
-     xml_serializer_AddRef,
-     xml_serializer_Release,
-     xml_serializer_GetTypeInfoCount,
-     xml_serializer_GetTypeInfo,
-     xml_serializer_GetIDsOfNames,
-     xml_serializer_Invoke,
-     xml_serializer_serializeToString
- };
+static const IXMLSerializerVtbl xml_serializer_vtbl = {
+    xml_serializer_QueryInterface,
+    xml_serializer_AddRef,
+    xml_serializer_Release,
+    xml_serializer_GetTypeInfoCount,
+    xml_serializer_GetTypeInfo,
+    xml_serializer_GetIDsOfNames,
+    xml_serializer_Invoke,
+    xml_serializer_serializeToString
+};
  
  static inline struct xml_serializer *xml_serializer_from_DispatchEx(DispatchEx *iface)
  {
