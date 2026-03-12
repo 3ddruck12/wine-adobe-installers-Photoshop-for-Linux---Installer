@@ -1,5 +1,14 @@
 # Changelog – Photoshop AppImage
 
+## v3.07-alpha (2026-03-12)
+
+### ✨ Features
+- **AdobeOnLinux & Vyrnexis Workarounds:**
+  - **Dependencies:** Hinzufügen von `webview2` und `powershell` für bessere Installer-Kompatibilität.
+  - **Version Overrides:** Automatisches Erzwingen des Windows 7 Modus für kritische Adobe-Dienste (Creative Cloud, Node.exe, IPCBroker).
+  - **VC++ Repair:** Automatisierte Reparatur von `msvcp140.dll` (Erzwingen der 64-Bit Version aus dem Winetricks-Cache).
+  - **Premium Dark Mode:** Abgestimmtes dunkles Farbschema für die gesamte Wine-Umgebung (Menüs & Dialoge).
+
 ## v3.06-alpha (2026-02-08)
 
 ### ✨ Features

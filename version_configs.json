@@ -2,13 +2,13 @@
   "cc2021": {
     "display_name": "Adobe Photoshop CC 2021",
     "wine_version": "11.1",
-    "winetricks": ["msxml3", "msxml6", "vcrun2019", "atmlib", "gdiplus", "corefonts"],
+    "winetricks": ["msxml3", "msxml6", "vcrun2019", "atmlib", "gdiplus", "corefonts", "webview2", "powershell"],
     "executable": "Photoshop.exe"
   },
   "cc2025": {
     "display_name": "Adobe Photoshop CC 2025 (Experimental)",
     "wine_version": "11.1",
-    "winetricks": ["msxml3", "msxml6", "vcrun2022", "atmlib", "gdiplus", "corefonts"],
+    "winetricks": ["msxml3", "msxml6", "vcrun2022", "atmlib", "gdiplus", "corefonts", "webview2", "powershell"],
     "executable": "Photoshop.exe"
   }
 }

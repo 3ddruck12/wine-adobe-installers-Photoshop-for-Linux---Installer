@@ -519,7 +519,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         )
         app_menu.addAction("About", lambda: QMessageBox.about(
             self, "About",
-            "Photoshop for Linux v3.06-alpha\n"
+            "Photoshop for Linux v3.07-alpha\n"
             "Wine 11.1 \u00b7 Pre-compiled build (WoW64)\n"
             "Community project \u2013 not affiliated with Adobe.\n\n"
             "\u2615 Support: https://ko-fi.com/3ddruck12"
@@ -654,6 +654,11 @@ class PhotoshopInstallerGUI(QMainWindow):
         btn_gpu_info.setToolTip("Auto-detect your GPU and suggest optimal settings")
         btn_gpu_info.clicked.connect(self.detect_and_recommend_gpu)
         adv_l.addWidget(btn_gpu_info)
+
+        btn_dark = QPushButton("\u2728 Apply Premium Dark Mode")
+        btn_dark.setToolTip("Apply a Photoshop-matching dark theme to the Wine environment")
+        btn_dark.clicked.connect(self.apply_dark_mode)
+        adv_l.addWidget(btn_dark)
 
         ctrl.addWidget(adv)
 
@@ -965,7 +970,11 @@ class PhotoshopInstallerGUI(QMainWindow):
         self._set_busy(False)
         if success:
             self.progress_bar.setValue(100)
-            self.log_ok("<b>Setup completed!</b> You can now run the Photoshop installer.")
+            self.log_ok("<b>Setup completed!</b> Applying Adobe version overrides...")
+            self.apply_adobe_winver_overrides()
+            self.repair_vcrun_msvcp140()
+            self.apply_dark_mode()
+            self.log_ok("<b>Setup fully completed!</b> You can now run the Photoshop installer.")
         else:
             self.log_err("<b>Setup failed.</b> Check the log above for details.")
         self._refresh_status()
@@ -1516,6 +1525,122 @@ class PhotoshopInstallerGUI(QMainWindow):
             self.log_ok("All stability fixes applied.")
         except Exception as e:
             self.log_err(f"Fix error: {e}")
+
+    def _set_app_winver(self, exe_name, version):
+        """Set application-specific Windows version in Wine registry."""
+        wine = get_wine_binary()
+        if not wine:
+            return
+        env = self._wine_env()
+        try:
+            subprocess.run(
+                [wine, "reg", "add",
+                 rf"HKCU\Software\Wine\AppDefaults\{exe_name}",
+                 "/v", "Version", "/t", "REG_SZ", "/d", version, "/f"],
+                env=env, capture_output=True, timeout=10,
+            )
+        except Exception:
+            pass
+
+    def apply_adobe_winver_overrides(self):
+        """Force Windows 7 mode for specific Adobe services to avoid crashes."""
+        self.log("Applying Windows version overrides for Adobe services...")
+        adobe_services = [
+            "Creative Cloud.exe",
+            "Creative Cloud Helper.exe",
+            "Creative Cloud UI Helper.exe",
+            "CCXProcess.exe",
+            "AdobeIPCBroker.exe",
+            "Adobe Crash Processor.exe",
+            "node.exe",
+        ]
+        for service in adobe_services:
+            self.log(f"  Setting {service} to win7 mode")
+            self._set_app_winver(service, "win7")
+        self.log_ok("Adobe version overrides applied.")
+
+    def repair_vcrun_msvcp140(self):
+        """Repair broken or 32-bit msvcp140.dll in system32 (Vyrnexis fix)."""
+        prefix = Path(get_prefix_path())
+        dll_path = prefix / "drive_c" / "windows" / "system32" / "msvcp140.dll"
+        
+        redist_path = Path.home() / ".cache" / "winetricks" / "vcrun2015" / "vc_redist.x64.exe"
+        if not redist_path.exists():
+            return
+            
+        is_64bit = False
+        if dll_path.exists():
+            try:
+                result = subprocess.run(["file", "-b", str(dll_path)], capture_output=True, text=True)
+                if "PE32+" in result.stdout:
+                    is_64bit = True
+            except Exception:
+                pass
+                
+        if not is_64bit:
+            self.log("Repairing msvcp140.dll (forcing 64-bit version)...")
+            try:
+                import tempfile
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    subprocess.run(["cabextract", "-q", "-d", tmp_dir, str(redist_path)], check=True)
+                    chunks = list(Path(tmp_dir).glob("a*"))
+                    for chunk in chunks:
+                        subprocess.run(["cabextract", "-q", "-F", "msvcp140.dll", "-d", tmp_dir, str(chunk)], capture_output=True)
+                        extracted = Path(tmp_dir) / "msvcp140.dll"
+                        if extracted.exists():
+                            v = subprocess.run(["file", "-b", str(extracted)], capture_output=True, text=True)
+                            if "PE32+" in v.stdout:
+                                shutil.copy2(extracted, dll_path)
+                                self.log_ok("msvcp140.dll successfully repaired.")
+                                return
+            except Exception as e:
+                self.log_err(f"VC++ repair failed: {e}")
+
+    def apply_dark_mode(self):
+        """Apply a premium dark theme to the Wine environment (Vyrnexis style)."""
+        self.log("Applying premium Dark Mode to Wine...")
+        wine = get_wine_binary()
+        if not wine:
+            return
+        env = self._wine_env()
+        
+        colors = {
+            "ActiveBorder": "49 54 58",
+            "ActiveTitle": "49 54 58",
+            "AppWorkSpace": "60 64 72",
+            "Background": "49 54 58",
+            "ButtonFace": "49 54 58",
+            "ButtonHilight": "119 126 140",
+            "ButtonLight": "60 64 72",
+            "ButtonShadow": "60 64 72",
+            "ButtonText": "219 220 222",
+            "GradientActiveTitle": "49 54 58",
+            "GradientInactiveTitle": "49 54 58",
+            "GrayText": "155 155 155",
+            "Hilight": "119 126 140",
+            "HilightText": "255 255 255",
+            "InactiveBorder": "49 54 58",
+            "InfoWindow": "49 54 58",
+            "Menu": "49 54 58",
+            "MenuBar": "49 54 58",
+            "MenuHilight": "119 126 140",
+            "MenuText": "219 220 222",
+            "Scrollbar": "73 78 88",
+            "TitleText": "219 220 222",
+            "Window": "35 38 41",
+            "WindowFrame": "49 54 58",
+            "WindowText": "219 220 222",
+        }
+        
+        try:
+            for key, val in colors.items():
+                subprocess.run(
+                    [wine, "reg", "add", r"HKCU\Control Panel\Colors", "/v", key, "/t", "REG_SZ", "/d", val, "/f"],
+                    env=env, capture_output=True, timeout=5
+                )
+            self.log_ok("Wine Dark Mode applied successfully!")
+        except Exception as e:
+            self.log_err(f"Failed to apply Dark Mode: {e}")
 
     # ── Full Environment Reset ────────────────────────────────────────
 
