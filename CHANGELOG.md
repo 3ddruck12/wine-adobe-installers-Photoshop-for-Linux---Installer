@@ -1,5 +1,15 @@
 # Changelog – Photoshop AppImage
 
+## v3.10-alpha (2026-05-18)
+
+### ✨ Features
+- **Wine 11.9:** Bundled Wine upgraded from 11.1 to [Wine 11.9](https://dl.winehq.org/wine/source/11.x/wine-11.9.tar.xz) (May 2026 stable).
+- **CI:** GitHub Actions workflow downloads and compiles `wine-11.9` with existing `wine-patches/` and `--disable-tests`.
+
+### 🔧 Maintenance
+- Build cache directory renamed to `wine-11.9-build/`.
+- Version strings in GUI, `version_configs.json`, and docs updated to Wine 11.9.
+
 ## v3.09-alpha (2026-03-12)
 
 ### ✨ Features

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Photoshop Linux Installer - PyQt6 GUI
-Installs Adobe Photoshop on Linux via a pre-compiled Wine 11.1 build.
+Installs Adobe Photoshop on Linux via a pre-compiled Wine 11.9 build.
 
 Copyright (C) 2026 Jens (3ddruck12)
 
@@ -53,7 +53,7 @@ def get_wine_binary():
     # Fallback: development / non-AppImage
     dev_wine = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "wine-11.1-build", "wine"
+        "wine-11.9-build", "wine"
     )
     if os.path.isfile(dev_wine) and os.access(dev_wine, os.X_OK):
         return dev_wine
@@ -519,8 +519,8 @@ class PhotoshopInstallerGUI(QMainWindow):
         )
         app_menu.addAction("About", lambda: QMessageBox.about(
             self, "About",
-            "Photoshop for Linux v3.09-alpha\n"
-            "Wine 11.1 \u00b7 Pre-compiled build (WoW64)\n"
+            "Photoshop for Linux v3.10-alpha\n"
+            "Wine 11.9 \u00b7 Pre-compiled build (WoW64)\n"
             "Community project \u2013 not affiliated with Adobe.\n\n"
             "\u2615 Support: https://ko-fi.com/3ddruck12"
         ))

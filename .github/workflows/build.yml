@@ -41,8 +41,8 @@ jobs:
 
       - name: Download Wine source
         run: |
-          wget https://dl.winehq.org/wine/source/11.x/wine-11.1.tar.xz
-          tar -xf wine-11.1.tar.xz
+          wget https://dl.winehq.org/wine/source/11.x/wine-11.9.tar.xz
+          tar -xf wine-11.9.tar.xz
 
       - name: Build AppImage
         run: |

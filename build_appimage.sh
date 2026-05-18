@@ -1,5 +1,5 @@
 #!/bin/bash
-# build_appimage.sh - Build Photoshop Installer AppImage with pre-compiled Wine 11.1
+# build_appimage.sh - Build Photoshop Installer AppImage with pre-compiled Wine 11.9
 # Licensed under GNU GPL v3.0
 # Copyright (C) 2026  (3ddruck12)
 #
@@ -10,7 +10,7 @@
 #   - Standard build tools: gcc, flex, bison, make, mingw-w64
 #
 # This script:
-#   1. Compiles Wine 11.1 from source (once, cached)
+#   1. Compiles Wine 11.9 from source (once, cached)
 #   2. Packages the Wine runtime + Python + PyQt6 + installer into an AppImage
 #   3. The end-user does NOT need to compile anything
 
@@ -18,8 +18,8 @@ set -euo pipefail
 
 APP_DIR="Photoshop.AppDir"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WINE_SOURCE="wine-11.1"
-WINE_BUILD_DIR="wine-11.1-build"
+WINE_SOURCE="wine-11.9"
+WINE_BUILD_DIR="wine-11.9-build"
 PYTHON_TAR="python-standalone.tar.gz"
 APPIMAGE_NAME="Photoshop_Installer_x86_64.AppImage"
 
@@ -33,7 +33,7 @@ WINE_BUILD_BASE="/tmp/wine-build-$$"
 
 if [ ! -d "$WINE_SOURCE" ]; then
     echo "ERROR: Wine source directory '$WINE_SOURCE' not found."
-    echo "Please place the Wine 11.1 source tree in the project root."
+    echo "Please place the Wine 11.9 source tree in the project root."
     exit 1
 fi
 
@@ -67,12 +67,12 @@ for cross in i686-w64-mingw32-gcc x86_64-w64-mingw32-gcc; do
     fi
 done
 
-# ── Step 1: Compile Wine 11.1 (cached) ────────────────────────────────────
+# ── Step 1: Compile Wine 11.9 (cached) ────────────────────────────────────
 
 if [ -f "$WINE_BUILD_DIR/wine" ]; then
-    echo "Wine 11.1 already compiled in $WINE_BUILD_DIR, skipping build."
+    echo "Wine 11.9 already compiled in $WINE_BUILD_DIR, skipping build."
 else
-    echo "=== Compiling Wine 11.1 (this takes 20-40 minutes) ==="
+    echo "=== Compiling Wine 11.9 (this takes 20-40 minutes) ==="
     echo "    Building in $WINE_BUILD_BASE to avoid spaces-in-path issues."
 
     rm -rf "$WINE_BUILD_DIR" "$WINE_BUILD_BASE"
@@ -114,7 +114,7 @@ else
     # Cleanup temp build
     rm -rf "$WINE_BUILD_BASE"
 
-    echo "=== Wine 11.1 compiled successfully ==="
+    echo "=== Wine 11.9 compiled successfully ==="
 fi
 
 WINE_INSTALL="$WINE_BUILD_DIR/install"
@@ -196,7 +196,7 @@ cat > "$APP_DIR/photoshop.desktop" << 'DESKTOP_EOF'
 [Desktop Entry]
 Type=Application
 Name=Photoshop Installer for Linux
-Comment=Install and manage Adobe Photoshop via Wine 11.1
+Comment=Install and manage Adobe Photoshop via Wine 11.9
 Exec=AppRun
 Icon=photoshop
 Categories=Graphics;
@@ -253,6 +253,6 @@ echo "============================================"
 echo "  SUCCESS: $APPIMAGE_NAME created!"
 echo "  Size: $(du -h "$APPIMAGE_NAME" | cut -f1)"
 echo ""
-echo "  Wine 11.1 is pre-compiled and bundled."
+echo "  Wine 11.9 is pre-compiled and bundled."
 echo "  Users only need 'winetricks' installed."
 echo "============================================"

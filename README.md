@@ -3,7 +3,7 @@
 **Unofficial community project — v3.0**
 
 A modern, portable AppImage that installs and runs **Adobe Photoshop** on Linux.  
-Wine 11.1 is **pre-compiled and bundled** — no build tools needed on the user's system.
+Wine 11.9 is **pre-compiled and bundled** — no build tools needed on the user's system.
 
 Inspired by the [Affinity on Linux](https://github.com/ryzendew/Linux-Affinity-Installer)project.
 
@@ -19,7 +19,7 @@ This project is developed and maintained in my free time. If you find it useful,
 
 ## 🚀 Features
 
-- **Zero-compile experience** — Wine 11.1 ships pre-built inside the AppImage.
+- **Zero-compile experience** — Wine 11.9 ships pre-built inside the AppImage.
 - **Modern PyQt6 GUI** — Dark theme, responsive layout, all-English interface.
 - **One-Click Setup** — Creates a Wine prefix, installs winetricks components, and launches the Photoshop installer in one step.
 - **Smart Wine detection** — Automatically uses the bundled Wine; falls back to a local dev build or system Wine.
@@ -142,7 +142,7 @@ chmod +x Photoshop_Installer_x86_64.AppImage
 
 ### Installer dropdowns are empty / XML errors
 
-This was a known issue with older Wine versions (≤ 10.0). Wine 11.1 includes native `inproc_sync` which resolves these synchronization issues. Make sure you're using the bundled Wine, not an older system version.
+This was a known issue with older Wine versions (≤ 10.0). Wine 11.9 includes native `inproc_sync` which resolves these synchronization issues. Make sure you're using the bundled Wine, not an older system version.
 
 ---
 
@@ -152,7 +152,7 @@ This was a known issue with older Wine versions (≤ 10.0). Wine 11.1 includes n
 
 | Tool | Purpose |
 |---|---|
-| `gcc`, `flex`, `bison`, `make` | Compile Wine 11.1 |
+| `gcc`, `flex`, `bison`, `make` | Compile Wine 11.9 |
 | `mingw-w64` | Cross-compile Windows DLLs |
 | `libx11-dev`, `libfreetype-dev`, `libgnutls28-dev`, ... | Wine build dependencies |
 | `python-standalone.tar.gz` | Bundled Python runtime ([download](https://github.com/indygreg/python-build-standalone/releases)) |
@@ -161,14 +161,14 @@ This was a known issue with older Wine versions (≤ 10.0). Wine 11.1 includes n
 ### Build
 
 ```bash
-# 1. Place Wine 11.1 source in wine-11.1/
+# 1. Place Wine 11.9 source in wine-11.9/
 # 2. Place python-standalone.tar.gz in project root
 # 3. Build (compiles Wine + packages everything)
 bash build_appimage.sh
 ```
 
 The build script:
-1. **Compiles Wine 11.1** from source with `--enable-win64 --disable-tests`
+1. **Compiles Wine 11.9** from source with `--enable-win64 --disable-tests`
 2. **Automatically applies Adobe-specific patches** from the `wine-patches/` directory (included in this repo)
 3. **Bundles** the Wine runtime, standalone Python, PyQt6, and the installer script
 3. **Generates** `Photoshop_Installer_x86_64.AppImage`
@@ -181,7 +181,7 @@ The build script:
 
 | Component | Detail |
 |---|---|
-| **Wine** | 11.1 (vanilla, no patches needed) |
+| **Wine** | 11.9 (vanilla + wine-patches, Adobe installer fixes) |
 | **Sync mechanism** | Native `inproc_sync` (replaces old esync/fsync patches) |
 | **UI Framework** | PyQt6 with dark theme |
 | **Wine prefix** | `~/.photoshop_cc` |
@@ -213,7 +213,7 @@ AppImage
 | `PhotoshopInstaller.py` | Main GUI application |
 | `build_appimage.sh` | Build script (compiles Wine + creates AppImage) |
 | `version_configs.json` | Photoshop version definitions + winetricks lists |
-| `wine-11.1/` | Wine 11.1 source tree (used at build time only) |
+| `wine-11.9/` | Wine 11.9 source tree (used at build time only) |
 | `appimagetool` | AppImage packaging tool |
 | `linuxdeploy` | Library bundling tool |
 | `python-standalone.tar.gz` | Standalone Python build for bundling |

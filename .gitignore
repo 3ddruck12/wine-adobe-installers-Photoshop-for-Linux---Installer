@@ -20,11 +20,11 @@ Photoshop.AppDir/
 *.AppImage
 
 # Wine Source (do NOT commit — too large for git)
-wine-11.1/
+wine-11.9/
 wine-adobe-installers-fix-dropdowns/
 
 # Wine build output (cached, ~3GB)
-wine-11.1-build/
+wine-11.9-build/
 
 # Photoshop Repository (do NOT commit — large external repo)
 Photoshop Repo/
