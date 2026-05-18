@@ -86,6 +86,13 @@ else
     if [ -d "$PROJECT_DIR/wine-patches" ]; then
         echo "Applying Adobe Photoshop patches from wine-patches/..."
         cp -af "$PROJECT_DIR/wine-patches/." "$WINE_BUILD_BASE/src/"
+        if [ -d "$PROJECT_DIR/wine-patches/patches" ]; then
+            echo "Applying unified diffs from wine-patches/patches/..."
+            while IFS= read -r patchfile; do
+                echo "  $patchfile"
+                patch -p1 -d "$WINE_BUILD_BASE/src" --forward < "$patchfile" || exit 1
+            done < <(find "$PROJECT_DIR/wine-patches/patches" -name '*.patch' | sort)
+        fi
     fi
 
     (

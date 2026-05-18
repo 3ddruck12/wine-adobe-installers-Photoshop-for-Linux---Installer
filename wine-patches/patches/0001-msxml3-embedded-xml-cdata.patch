@@ -1,0 +1,49 @@
+--- a/dlls/msxml3/node.c
++++ b/dlls/msxml3/node.c
+@@ -48,6 +48,7 @@
+ #include "objsafe.h"
+ 
+ #include "msxml_private.h"
++#include "embedded_xml_cdata.h"
+ #include "saxreader_extensions.h"
+ 
+ #include "wine/debug.h"
+@@ -4137,20 +4138,26 @@
+     struct parse_context context;
+     HRESULT hr;
+     VARIANT v;
++    ISequentialStream *parse_stream = stream;
++    ISequentialStream *preprocessed = NULL;
++    void *preprocessed_buf = NULL;
+ 
+     *tree = NULL;
+ 
+     if (FAILED(hr = parse_context_init(&context, properties)))
+         return hr;
+ 
++    if (SUCCEEDED(embedded_xml_preprocess_stream(stream, utf16, &preprocessed, &preprocessed_buf)) && preprocessed)
++        parse_stream = preprocessed;
++
+     if (utf16)
+     {
+-        hr = ISAXXMLReaderExtension_parseUTF16(context.reader_extension, stream);
++        hr = ISAXXMLReaderExtension_parseUTF16(context.reader_extension, parse_stream);
+     }
+     else
+     {
+         V_VT(&v) = VT_UNKNOWN;
+-        V_UNKNOWN(&v) = (IUnknown *)stream;
++        V_UNKNOWN(&v) = (IUnknown *)parse_stream;
+         hr = ISAXXMLReader_parse(context.reader, v);
+     }
+ 
+@@ -4162,6 +4169,10 @@
+ 
+     parse_context_cleanup(&context);
+ 
++    if (preprocessed)
++        ISequentialStream_Release(preprocessed);
++    free(preprocessed_buf);
++
+     return hr;
+ }

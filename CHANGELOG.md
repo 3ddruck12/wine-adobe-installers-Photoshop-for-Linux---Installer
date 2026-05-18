@@ -1,10 +1,20 @@
 # Changelog – Photoshop AppImage
 
+## v3.11-alpha (2026-05-18)
+
+### 🐛 Bugfixes
+- **CI / Wine-Build:** Veraltete `wine-patches/dlls/msxml3/domdoc.c` (Wine-11.1-API) entfernt — behebt GitHub-Actions-Fehler `struct domnode has no member named 'node'` beim Kompilieren von Wine 11.9.
+- **MSXML3 (Adobe-Installer):** CDATA-/Embedded-XML-Fix nach Wine 11.9 portiert: `embedded_xml_cdata.c` + Patch auf `parse_stream()` in `node.c` (ersetzt libxml-`doparse()` aus 11.1).
+
+### 🔧 Maintenance
+- `build_appimage.sh` wendet `wine-patches/patches/*.patch` nach dem Datei-Copy an; Patch-Fehler brechen den Build ab.
+- [`NEXT_STEPS.md`](NEXT_STEPS.md) an Wine 11.9 und Patch-Strategie angepasst.
+
 ## v3.10-alpha (2026-05-18)
 
 ### ✨ Features
 - **Wine 11.9:** Bundled Wine upgraded from 11.1 to [Wine 11.9](https://dl.winehq.org/wine/source/11.x/wine-11.9.tar.xz) (May 2026 stable).
-- **CI:** GitHub Actions workflow downloads and compiles `wine-11.9` with existing `wine-patches/` and `--disable-tests`.
+- **CI:** GitHub Actions workflow downloads and compiles `wine-11.9` with `wine-patches/` and `--disable-tests` (MSXML-Patch in v3.11 nachgezogen).
 
 ### 🔧 Maintenance
 - Build cache directory renamed to `wine-11.9-build/`.
