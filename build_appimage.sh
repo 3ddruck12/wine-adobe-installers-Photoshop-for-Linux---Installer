@@ -84,8 +84,10 @@ else
 
     # Apply Adobe Photoshop patches if they exist
     if [ -d "$PROJECT_DIR/wine-patches" ]; then
-        echo "Applying Adobe Photoshop patches from wine-patches/..."
-        cp -af "$PROJECT_DIR/wine-patches/." "$WINE_BUILD_BASE/src/"
+        echo "Applying Adobe Photoshop patches (msxml3 sources + unified diffs)..."
+        if [ -d "$PROJECT_DIR/wine-patches/dlls/msxml3" ]; then
+            cp -af "$PROJECT_DIR/wine-patches/dlls/msxml3/." "$WINE_BUILD_BASE/src/dlls/msxml3/"
+        fi
         if [ -d "$PROJECT_DIR/wine-patches/patches" ]; then
             echo "Applying unified diffs from wine-patches/patches/..."
             while IFS= read -r patchfile; do

@@ -14,7 +14,7 @@ und der eigenen Codebase.
 |---|---|---|
 | **Wine 11.9** | [`build_appimage.sh`](build_appimage.sh), GitHub Actions | Aktuelle stabile Wine-Basis (mfplat, d2d1, combase-Fixes vs. 11.1) |
 | **MSXML3 CDATA / embedded `<?xml?>`** | `wine-patches/dlls/msxml3/embedded_xml_cdata.c` + `patches/0001-msxml3-embedded-xml-cdata.patch` | Adobe-Installer/XML: eingebettete Deklarationen und `*XMLData`-Inhalte (früher in `domdoc.c` für 11.1) |
-| **MSHTML-Patches** | `wine-patches/dlls/mshtml/*` | JS/DOM/Events für Installer-Web-UI — bei Wine-Upgrade **gegen neuen Tree testen** |
+| **MSHTML-Patches** | `wine-patches/patches/0002–0004-mshtml-*.patch` | dispex, childNodes-Enum, Event-Handler-Strings — **keine** Vollständigen Datei-Copies mehr |
 | **Unified-Diff-Patches** | `wine-patches/patches/*.patch` | Werden nach `cp -af` mit `patch -p1` angewendet (z. B. Hook in `node.c`) |
 
 **Wichtig:** Die alte `wine-patches/dlls/msxml3/domdoc.c` (Wine-11.1-API) darf **nicht** mehr

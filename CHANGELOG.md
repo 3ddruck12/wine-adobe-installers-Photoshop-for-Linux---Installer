@@ -1,5 +1,13 @@
 # Changelog – Photoshop AppImage
 
+## v3.11.1-alpha (2026-05-18)
+
+### 🐛 Bugfixes
+- **CI / MSHTML:** Veraltete Vollständige `wine-patches/dlls/mshtml/*`-Overrides entfernt (u. a. `omnavigator.c` mit `IXMLSerializer` vs. Wine-11.9-`IDOMXmlSerializer`). Adobe-Fixes als Unified-Diffs: `dispex`, `htmlnode` (childNodes-Enum), `htmlelem`/`htmlevent` (Event-Handler-Strings).
+
+### 🔧 Maintenance
+- Legacy-MSHTML-Dateien unter `wine-patches/archive/mshtml-wine11.1-legacy/`.
+
 ## v3.11-alpha (2026-05-18)
 
 ### 🐛 Bugfixes

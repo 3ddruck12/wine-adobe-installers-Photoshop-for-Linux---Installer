@@ -1,0 +1,11 @@
+--- a/dlls/mshtml/dispex.c	2026-05-15 22:11:12.000000000 +0200
++++ b/dlls/mshtml/dispex.c	2026-05-18 21:50:20.310520701 +0200
+@@ -2394,7 +2394,7 @@
+     if(!ensure_real_info(This))
+         return E_OUTOFMEMORY;
+ 
+-    if(This->jsdisp)
++    if(This->jsdisp && !is_dynamic_dispid(id))
+         return IWineJSDispatch_InvokeEx(This->jsdisp, id, lcid, wFlags, pdp, pvarRes, pei, pspCaller);
+ 
+     switch(wFlags) {

@@ -1,0 +1,151 @@
+--- a/dlls/mshtml/htmlelem.c
++++ b/dlls/mshtml/htmlelem.c
+@@ -1039,6 +1039,12 @@
+ 
+     TRACE("(%p)->(%s %s %08lx)\n", This, debugstr_w(strAttributeName), debugstr_variant(&AttributeValue), lFlags);
+ 
++    hres = set_node_event_handler_by_attr(&This->node, strAttributeName, &val);
++    if(FAILED(hres))
++        return hres;
++    if(hres == S_OK)
++        goto done;
++
+     if(compat_mode < COMPAT_MODE_IE9 || !This->dom_element) {
+         hres = dispex_get_id(&This->node.event_target.dispex, translate_attr_name(strAttributeName, compat_mode),
+                 (lFlags&ATTRFLAG_CASESENSITIVE ? fdexNameCaseSensitive : fdexNameCaseInsensitive) | fdexNameEnsure, &dispid);
+--- a/dlls/mshtml/htmlevent.h
++++ b/dlls/mshtml/htmlevent.h
+@@ -98,11 +98,11 @@
+ 
+ const WCHAR *get_event_name(eventid_t);
+ void check_event_attr(HTMLDocumentNode*,nsIDOMElement*);
+-void event_attr_changed(HTMLDocumentNode*,nsIDOMElement*,const WCHAR*);
+ void traverse_event_target(EventTarget*,nsCycleCollectionTraversalCallback*);
+ void release_event_target(EventTarget*);
+ HRESULT set_event_handler(EventTarget*,eventid_t,VARIANT*);
+ HRESULT get_event_handler(EventTarget*,eventid_t,VARIANT*);
++HRESULT set_node_event_handler_by_attr(HTMLDOMNode*,const WCHAR*,VARIANT*);
+ HRESULT attach_event(EventTarget*,BSTR,IDispatch*,VARIANT_BOOL*);
+ HRESULT detach_event(EventTarget*,BSTR,IDispatch*);
+ HRESULT fire_event(HTMLDOMNode*,const WCHAR*,VARIANT*,VARIANT_BOOL*);
+--- a/dlls/mshtml/htmlevent.c
++++ b/dlls/mshtml/htmlevent.c
+@@ -108,7 +108,7 @@
+ #define EVENT_CANCELABLE         0x0008
+ /* Event may have default handler (so we always have to register Gecko listener). */
+ #define EVENT_HASDEFAULTHANDLERS 0x0020
+-/* Event is not supported properly, print FIXME message when it's used. */
++/* Ecent is not supported properly, print FIXME message when it's used. */
+ #define EVENT_FIXME              0x0040
+ 
+ /* mouse event flags for fromElement and toElement implementation */
+@@ -4748,12 +4748,20 @@
+         return set_event_handler_disp(event_target, eid, V_DISPATCH(var));
+ 
+     case VT_BSTR: {
+-        compat_mode_t compat_mode = dispex_compat_mode(&event_target->dispex);
+         VARIANT *v;
+         HRESULT hres;
+ 
+-        if(compat_mode == COMPAT_MODE_IE8)
++        if(!use_event_quirks(event_target)) {
++            const event_target_vtbl_t *vtbl = dispex_get_vtbl(&event_target->dispex);
++            if(vtbl->get_parent_event_target) {
++                EventTarget *parent = vtbl->get_parent_event_target(&event_target->dispex);
++                if(parent) {
++                    /* This is a hack to get the window from any node. */
++                    /* Actually, we should probably just use script_parse_event if we can find the window. */
++                }
++            }
+             FIXME("Setting to string %s not supported\n", debugstr_w(V_BSTR(var)));
++        }
+ 
+         /*
+          * Setting event handler to string is a rare case and we don't want to
+@@ -4762,8 +4770,6 @@
+          * properties.
+          */
+         remove_event_handler(event_target, eid);
+-        if(compat_mode >= COMPAT_MODE_IE9)
+-            return S_OK;
+ 
+         hres = get_event_dispex_ref(event_target, eid, TRUE, &v);
+         if(FAILED(hres))
+@@ -4808,6 +4814,31 @@
+     return S_OK;
+ }
+ 
++HRESULT set_node_event_handler_by_attr(HTMLDOMNode *node, const WCHAR *name, VARIANT *var)
++{
++    eventid_t eid;
++
++    eid = attr_to_eid(name);
++    if(eid == EVENTID_LAST)
++        return S_FALSE;
++
++    if(V_VT(var) == VT_BSTR && node->doc->window) {
++        IDispatch *disp = script_parse_event(node->doc->window, V_BSTR(var));
++        if(disp) {
++            VARIANT v;
++            HRESULT hres;
++
++            V_VT(&v) = VT_DISPATCH;
++            V_DISPATCH(&v) = disp;
++            hres = set_node_event(node, eid, &v);
++            IDispatch_Release(disp);
++            return hres;
++        }
++    }
++
++    return set_node_event(node, eid, var);
++}
++
+ HRESULT attach_event(EventTarget *event_target, BSTR name, IDispatch *disp, VARIANT_BOOL *res)
+ {
+     listener_container_t *container;
+@@ -4884,45 +4915,6 @@
+     }
+ }
+ 
+-void event_attr_changed(HTMLDocumentNode *doc, nsIDOMElement *nselem, const WCHAR *name)
+-{
+-    nsAString name_str, value_str;
+-    const PRUnichar *value;
+-    HTMLDOMNode *node;
+-    IDispatch *disp;
+-    eventid_t eid;
+-    nsresult nsres;
+-    HRESULT hres;
+-
+-    eid = attr_to_eid(name);
+-    if(eid == EVENTID_LAST)
+-        return;
+-
+-    hres = get_node((nsIDOMNode*)nselem, TRUE, &node);
+-    if(FAILED(hres))
+-        return;
+-
+-    nsAString_InitDepend(&name_str, name);
+-    nsAString_InitDepend(&value_str, NULL);
+-
+-    nsres = nsIDOMElement_GetAttribute(nselem, &name_str, &value_str);
+-    if(NS_SUCCEEDED(nsres)) {
+-        nsAString_GetData(&value_str, &value);
+-
+-        TRACE("%p.%s = %s\n", nselem, debugstr_w(name), debugstr_w(value));
+-
+-        disp = script_parse_event(doc->window, value);
+-        if(disp) {
+-            set_event_handler_disp(get_node_event_prop_target(node, eid), eid, disp);
+-            IDispatch_Release(disp);
+-        }
+-    }
+-
+-    node_release(node);
+-    nsAString_Finish(&name_str);
+-    nsAString_Finish(&value_str);
+-}
+-
+ void check_event_attr(HTMLDocumentNode *doc, nsIDOMElement *nselem)
+ {
+     nsIDOMMozNamedAttrMap *attr_map;
