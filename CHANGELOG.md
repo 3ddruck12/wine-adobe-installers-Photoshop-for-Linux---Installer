@@ -1,5 +1,10 @@
 # Changelog – Photoshop AppImage
 
+## v3.11.2-alpha (2026-05-18)
+
+### 🐛 Bugfixes
+- **CI / MSHTML:** `event_attr_changed` im Patch `0004` wiederhergestellt — Wine 11.9 ruft die Funktion aus `mutation.c` auf; v3.11.1 scheiterte beim Linken mit „undefined reference to `event_attr_changed`“.
+
 ## v3.11.1-alpha (2026-05-18)
 
 ### 🐛 Bugfixes
