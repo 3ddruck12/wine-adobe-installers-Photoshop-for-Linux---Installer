@@ -21,22 +21,27 @@ und der eigenen Codebase.
 mit Wine 11.9 kombiniert werden — Build bricht mit `struct domnode has no member named 'node'`.
 Der Adobe-Fix lebt jetzt in `parse_stream()` (Wine-11.9-`msxml3`), nicht in `doparse()`.
 
-### Laufzeit (Hauptrepo heute)
+### Laufzeit (`PhotoshopInstaller.py`)
 
 | Fix | Wirkung |
 |---|---|
 | `apply_adobe_winver_overrides()` | win7-Mode für CC, IPCBroker, `node.exe`, … |
 | `repair_vcrun_msvcp140()` | 64-Bit-`msvcp140.dll` aus Winetricks-Cache |
+| `apply_adobe_runtime_fixes()` | GrowthSDK `.disabled`, Lowercase-Symlinks, `dxvk.conf` |
+| `make_wine_env()` | setzt `DXVK_CONFIG_FILE` wenn `~/.photoshop_cc/dxvk.conf` existiert |
 
-### Geplant / Roadmap (noch nicht in `PhotoshopInstaller.py`)
+**Automatisch:** nach Setup, nach Installer-Ende, vor **Launch Photoshop** / `--launch`.  
+**Manuell:** Buttons „Apply Adobe Runtime Fixes“ und „Show Adobe Fixes Status“.
 
-Diese Fixes aus dem Lightroom-Repo — Ziel: `apply_adobe_runtime_fixes()` idempotent beim Launch:
+### Geplant / Roadmap
 
 | Fix | Wirkung |
 |---|---|
-| `AdobeGrowthSDK.dll` → `.disabled` | Crash `SetThreadpoolTimerEx` vermeiden |
-| Lowercase-Symlinks für Adobe DLLs/EXEs | Case-sensitive Imports (`agkernel.dll` etc.) |
-| `dxvk.conf` + `DXVK_CONFIG_FILE` | CC-Login-Fenster (Dummy-Composition-Swapchain) |
+| mfplat / d2d1 Wine-Patches | §3.2–3.3 (bei Log-Mustern) |
+| Stub-DLLs (NDFAPI, …) | §3.4 |
+| ~~Wine-Log-Analyzer~~ | §4.2 — in v3.11.3 bei „Save Installation Log“ |
+| Erste-Hilfe nach Photoshop-Crash | §6.2 |
+| Presets-Backup vor Full Reset | §7 |
 
 ---
 

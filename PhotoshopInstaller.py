@@ -26,6 +26,7 @@ import shutil
 import threading
 import json
 import re
+import tempfile
 from pathlib import Path
 import time
 
@@ -74,6 +75,274 @@ def get_wine_server():
         if os.path.isfile(server):
             return server
     return shutil.which("wineserver")
+
+
+def wine_sync(env, timeout=120):
+    """Wait until pending wineserver operations finish (avoids reg/wineboot hangs)."""
+    wineserver = get_wine_server()
+    if not wineserver:
+        return
+    try:
+        subprocess.run(
+            [wineserver, "-w"],
+            env=env, capture_output=True, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
+DXVK_CONF_TEMPLATE = (
+    "# Photoshop AppImage — Adobe/Wine compatibility\n"
+    "dxgi.enableDummyCompositionSwapchain = True\n"
+)
+
+ADOBE_BINARY_SUFFIXES = {".dll", ".exe", ".ocx", ".api"}
+
+# Known Wine log patterns → user-facing hints (NEXT_STEPS.md §4.2)
+WINE_LOG_HINTS = [
+    (
+        re.compile(r"mfplat\.dll.*not found|MFCreateSampleCopierMFT", re.I),
+        "mfplat / Content-Aware: Wine mfplat-Patch nötig (NEXT_STEPS.md §3.2) oder Wine-Build aktualisieren.",
+    ),
+    (
+        re.compile(r"0x88990028|CreateD2DDeviceResources failed", re.I),
+        "Direct2D / Color Management: d2d1-Patch erwägen (NEXT_STEPS.md §3.3).",
+    ),
+    (
+        re.compile(r"SetThreadpoolTimerEx", re.I),
+        "GrowthSDK: „Apply Adobe Runtime Fixes“ ausführen (deaktiviert AdobeGrowthSDK.dll).",
+    ),
+    (
+        re.compile(r"NDFAPI\.DLL|wkscli\.dll|uiacore", re.I),
+        "Fehlende Windows-DLL: Stub-DLLs installieren (NEXT_STEPS.md §3.4).",
+    ),
+    (
+        re.compile(r"msxml3|MSXML|XML", re.I),
+        "XML/MSXML: Bundled Wine 11.9 + AppImage v3.11+ verwenden.",
+    ),
+]
+
+
+def get_dxvk_conf_path(prefix_path=None):
+    return Path(prefix_path or get_prefix_path()) / "dxvk.conf"
+
+
+def make_wine_env():
+    """Wine environment for subprocess / Popen (bundled DLLs + dxvk.conf)."""
+    env = os.environ.copy()
+    env["WINEPREFIX"] = get_prefix_path()
+    wine = get_wine_binary()
+    if wine:
+        env["WINE"] = wine
+        wine_dir = os.path.dirname(wine)
+        wineserver = os.path.join(wine_dir, "wineserver")
+        if os.path.isfile(wineserver):
+            env["WINESERVER"] = wineserver
+
+    appdir = os.environ.get("APPDIR")
+    if appdir:
+        dll_dirs = [
+            os.path.join(appdir, "usr", "lib64", "wine", "x86_64-unix"),
+            os.path.join(appdir, "usr", "lib", "wine", "x86_64-unix"),
+            os.path.join(appdir, "usr", "lib64", "wine", "i386-unix"),
+            os.path.join(appdir, "usr", "lib", "wine", "i386-unix"),
+            os.path.join(appdir, "usr", "lib64", "wine"),
+            os.path.join(appdir, "usr", "lib", "wine"),
+        ]
+        extra = ":".join(d for d in dll_dirs if os.path.isdir(d))
+        if extra:
+            env["WINEDLLPATH"] = extra + ":" + env.get("WINEDLLPATH", "")
+
+    dxvk_conf = get_dxvk_conf_path()
+    if dxvk_conf.is_file():
+        env["DXVK_CONFIG_FILE"] = str(dxvk_conf.resolve())
+
+    return env
+
+
+def find_photoshop_install_dirs(prefix_path=None):
+    """Return installed Photoshop directories under the Wine prefix."""
+    prefix = Path(prefix_path or get_prefix_path())
+    adobe = prefix / "drive_c" / "Program Files" / "Adobe"
+    if not adobe.is_dir():
+        return []
+    return sorted(
+        (p for p in adobe.glob("Adobe Photoshop*") if p.is_dir()),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+
+
+def disable_adobe_growthsdk(prefix_path=None):
+    """
+    Disable AdobeGrowthSDK.dll (SetThreadpoolTimerEx crashes under Wine).
+    Returns (newly_disabled, already_disabled).
+    """
+    prefix = Path(prefix_path or get_prefix_path())
+    newly = already = 0
+    for dll in prefix.glob("drive_c/**/AdobeGrowthSDK.dll"):
+        if not dll.is_file():
+            continue
+        disabled = dll.with_name(dll.name + ".disabled")
+        if disabled.exists():
+            already += 1
+            continue
+        try:
+            dll.rename(disabled)
+            newly += 1
+        except OSError:
+            pass
+    return newly, already
+
+
+def ensure_lowercase_symlinks(directory):
+    """
+    Lowercase symlinks for mixed-case DLL/EXE names (case-sensitive Linux FS).
+    Returns (created, skipped).
+    """
+    root = Path(directory)
+    if not root.is_dir():
+        return 0, 0
+
+    created = skipped = 0
+    for path in root.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        if path.suffix.lower() not in ADOBE_BINARY_SUFFIXES:
+            continue
+        lower_name = path.name.lower()
+        if lower_name == path.name:
+            continue
+        link = path.parent / lower_name
+        if link.exists() or link.is_symlink():
+            skipped += 1
+            continue
+        try:
+            os.symlink(path.name, link)
+            created += 1
+        except OSError:
+            skipped += 1
+    return created, skipped
+
+
+def ensure_dxvk_conf(prefix_path=None):
+    """Write dxvk.conf into the prefix. Returns True if created or updated."""
+    path = get_dxvk_conf_path(prefix_path)
+    content = DXVK_CONF_TEMPLATE
+    if path.is_file():
+        try:
+            existing = path.read_text(encoding="utf-8")
+            if "enableDummyCompositionSwapchain" in existing:
+                return False
+        except OSError:
+            pass
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def apply_adobe_runtime_fixes(prefix_path=None):
+    """
+    Idempotent Adobe-on-Linux runtime fixes (Lightroom-Repo style).
+    Returns a report dict for logging / status UI.
+    """
+    prefix = Path(prefix_path or get_prefix_path())
+    report = {
+        "growthsdk_new": 0,
+        "growthsdk_already": 0,
+        "symlinks_created": 0,
+        "symlinks_skipped": 0,
+        "photoshop_dirs": [],
+        "dxvk_conf_updated": False,
+        "dxvk_conf_path": str(get_dxvk_conf_path(prefix)),
+        "cc_network_registry": False,
+    }
+
+    new_g, already_g = disable_adobe_growthsdk(prefix)
+    report["growthsdk_new"] = new_g
+    report["growthsdk_already"] = already_g
+
+    for ps_dir in find_photoshop_install_dirs(prefix):
+        report["photoshop_dirs"].append(str(ps_dir))
+        created, skipped = ensure_lowercase_symlinks(ps_dir)
+        report["symlinks_created"] += created
+        report["symlinks_skipped"] += skipped
+
+    report["dxvk_conf_updated"] = ensure_dxvk_conf(prefix)
+    report["cc_network_registry"] = apply_cc_network_registry(prefix)
+    return report
+
+
+def apply_cc_network_registry(prefix_path=None):
+    """NLA ActiveDnsProbeHost tweak for Creative Cloud network detection."""
+    wine = get_wine_binary()
+    if not wine:
+        return False
+    env = make_wine_env()
+    wine_sync(env, timeout=30)
+    try:
+        result = subprocess.run(
+            [
+                wine, "reg", "add",
+                r"HKLM\SYSTEM\CurrentControlSet\Services\NlaSvc\Parameters\Internet",
+                "/v", "ActiveDnsProbeHost", "/t", "REG_SZ", "/d", "www.adobe.com", "/f",
+            ],
+            env=env, capture_output=True, timeout=30,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def analyze_wine_log(text):
+    """Return list of hint strings matching known error patterns."""
+    if not text:
+        return []
+    hints = []
+    seen = set()
+    for pattern, message in WINE_LOG_HINTS:
+        if pattern.search(text) and message not in seen:
+            hints.append(message)
+            seen.add(message)
+    return hints
+
+
+def format_adobe_runtime_fixes_report(report):
+    """Human-readable status from apply_adobe_runtime_fixes()."""
+    lines = ["<b>Adobe runtime fixes status</b>"]
+
+    g_new = report.get("growthsdk_new", 0)
+    g_done = report.get("growthsdk_already", 0)
+    if g_new:
+        lines.append(f"GrowthSDK: {g_new} disabled")
+    elif g_done:
+        lines.append(f"GrowthSDK: {g_done} already disabled")
+    else:
+        lines.append("GrowthSDK: none found (OK if Photoshop not installed yet)")
+
+    ps_dirs = report.get("photoshop_dirs") or []
+    if ps_dirs:
+        lines.append(
+            f"Lowercase symlinks: {report.get('symlinks_created', 0)} created, "
+            f"{report.get('symlinks_skipped', 0)} already present"
+        )
+        for d in ps_dirs[:3]:
+            lines.append(f"  • {Path(d).name}")
+    else:
+        lines.append("Lowercase symlinks: no Photoshop folder yet")
+
+    dxvk_path = report.get("dxvk_conf_path", "")
+    if report.get("dxvk_conf_updated"):
+        lines.append(f"DXVK: wrote {dxvk_path}")
+    elif Path(dxvk_path).is_file():
+        lines.append(f"DXVK: {dxvk_path} OK (enableDummyCompositionSwapchain)")
+    else:
+        lines.append("DXVK: dxvk.conf missing")
+
+    if report.get("cc_network_registry"):
+        lines.append("CC network: ActiveDnsProbeHost → www.adobe.com")
+
+    lines.append("DXVK_CONFIG_FILE is set at launch when dxvk.conf exists.")
+    return "<br>".join(lines)
 
 
 def get_prefix_path():
@@ -519,7 +788,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         )
         app_menu.addAction("About", lambda: QMessageBox.about(
             self, "About",
-            "Photoshop for Linux v3.11.2-alpha\n"
+            "Photoshop for Linux v3.11.3-alpha\n"
             "Wine 11.9 \u00b7 Pre-compiled build (WoW64)\n"
             "Community project \u2013 not affiliated with Adobe.\n\n"
             "\u2615 Support: https://ko-fi.com/3ddruck12"
@@ -612,6 +881,18 @@ class PhotoshopInstallerGUI(QMainWindow):
         btn_fix = QPushButton("Apply Photoshop Stability Fixes")
         btn_fix.clicked.connect(self.apply_ps_fixes)
         mt_l.addWidget(btn_fix)
+
+        btn_runtime = QPushButton("Apply Adobe Runtime Fixes")
+        btn_runtime.setToolTip(
+            "GrowthSDK disable, lowercase DLL symlinks, dxvk.conf "
+            "(also runs after setup / install / launch)"
+        )
+        btn_runtime.clicked.connect(self.apply_adobe_runtime_fixes)
+        mt_l.addWidget(btn_runtime)
+
+        btn_runtime_status = QPushButton("Show Adobe Fixes Status")
+        btn_runtime_status.clicked.connect(self.show_adobe_runtime_fixes_status)
+        mt_l.addWidget(btn_runtime_status)
 
         btn_repair = QPushButton("Deep Repair (Clean Caches)")
         btn_repair.clicked.connect(self.deep_repair)
@@ -745,12 +1026,7 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.log(f"<font color='#f44336'>{msg}</font>")
 
     def _wine_env(self):
-        env = os.environ.copy()
-        env["WINEPREFIX"] = get_prefix_path()
-        wine = get_wine_binary()
-        if wine:
-            env["WINE"] = wine
-        return env
+        return make_wine_env()
 
     def _set_busy(self, busy, label="Working..."):
         self.setup_btn.setEnabled(not busy)
@@ -973,6 +1249,7 @@ class PhotoshopInstallerGUI(QMainWindow):
             self.log_ok("<b>Setup completed!</b> Applying Adobe version overrides...")
             self.apply_adobe_winver_overrides()
             self.repair_vcrun_msvcp140()
+            self.apply_adobe_runtime_fixes(quiet=True)
             self.apply_dark_mode()
             self.log_ok("<b>Setup fully completed!</b> You can now run the Photoshop installer.")
         else:
@@ -1011,7 +1288,10 @@ class PhotoshopInstallerGUI(QMainWindow):
     def _on_installer_finished(self, success):
         self._set_busy(False)
         if success:
-            self.log_ok("Installer finished. Try 'Launch Photoshop'.")
+            self.log_ok("Installer finished. Applying post-install fixes...")
+            self.apply_adobe_runtime_fixes(quiet=True)
+            self.apply_ps_fixes(quiet=True)
+            self.log_ok("Try 'Launch Photoshop'.")
         else:
             self.log_err("Installer process reported an error.")
         self._refresh_status()
@@ -1046,6 +1326,9 @@ class PhotoshopInstallerGUI(QMainWindow):
                 "Have you run the installer yet?"
             )
             return
+
+        self.log("Applying Adobe runtime fixes before launch...")
+        self.apply_adobe_runtime_fixes(quiet=True)
 
         self.log(f"Launching Photoshop: {ps}")
         env = self._wine_env()
@@ -1486,16 +1769,75 @@ class PhotoshopInstallerGUI(QMainWindow):
         QMessageBox.information(self, "GPU Detection & Recommendations", msg)
         self.log("GPU detection completed \u2013 see recommendations dialog.")
 
+    # ── Adobe runtime fixes (GrowthSDK, symlinks, dxvk) ───────────────
+
+    def apply_adobe_runtime_fixes(self, quiet=False):
+        """Apply GrowthSDK disable, lowercase symlinks, and dxvk.conf."""
+        prefix = Path(get_prefix_path())
+        if not prefix.exists():
+            self.log_err("Wine prefix doesn't exist. Run One-Click Setup first.")
+            return None
+
+        if not quiet:
+            self.log("<b>Applying Adobe runtime fixes...</b>")
+
+        report = apply_adobe_runtime_fixes(prefix)
+
+        if not quiet:
+            if report["growthsdk_new"]:
+                self.log(f"  GrowthSDK: disabled {report['growthsdk_new']} file(s)")
+            elif report["growthsdk_already"]:
+                self.log(f"  GrowthSDK: already disabled ({report['growthsdk_already']})")
+            else:
+                self.log("  GrowthSDK: none found (install Photoshop first)")
+
+            if report["photoshop_dirs"]:
+                self.log(
+                    f"  Symlinks: {report['symlinks_created']} created, "
+                    f"{report['symlinks_skipped']} skipped"
+                )
+            else:
+                self.log("  Symlinks: no Photoshop directory yet")
+
+            if report["dxvk_conf_updated"]:
+                self.log_ok(f"  DXVK: wrote {report['dxvk_conf_path']}")
+            else:
+                self.log_ok(f"  DXVK: {report['dxvk_conf_path']} ready")
+
+            self.log_ok("Adobe runtime fixes applied.")
+        return report
+
+    def show_adobe_runtime_fixes_status(self):
+        """Show read-only status of Adobe runtime fixes."""
+        prefix = Path(get_prefix_path())
+        if not prefix.exists():
+            self.log_err("Wine prefix doesn't exist.")
+            QMessageBox.warning(self, "Adobe Fixes", "Wine prefix not found.")
+            return
+
+        report = apply_adobe_runtime_fixes(prefix)
+        text = format_adobe_runtime_fixes_report(report)
+        plain = re.sub(r"<[^>]+>", "", text.replace("<br>", "\n"))
+        self.log(plain)
+        box = QMessageBox(self)
+        box.setWindowTitle("Adobe Runtime Fixes")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(text)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.exec()
+
     # ── Stability Fixes ───────────────────────────────────────────────
 
-    def apply_ps_fixes(self):
+    def apply_ps_fixes(self, quiet=False):
         wine = get_wine_binary()
         if not wine:
             self.log_err("Wine binary not found!")
             return
 
         env = self._wine_env()
-        self.log("<b>Applying Photoshop stability fixes...</b>")
+        wine_sync(env)
+        if not quiet:
+            self.log("<b>Applying Photoshop stability fixes...</b>")
 
         overrides = [
             ("atmlib", "native"),
@@ -1504,7 +1846,8 @@ class PhotoshopInstallerGUI(QMainWindow):
         ]
         try:
             for dll, mode in overrides:
-                self.log(f"  DLL override: {dll} → {mode}")
+                if not quiet:
+                    self.log(f"  DLL override: {dll} → {mode}")
                 subprocess.run(
                     [wine, "reg", "add",
                      r"HKCU\Software\Wine\AppDefaults\Photoshop.exe\DllOverrides",
@@ -1512,7 +1855,8 @@ class PhotoshopInstallerGUI(QMainWindow):
                     env=env, capture_output=True, timeout=15,
                 )
 
-            self.log("  Disabling Photoshop Home Screen...")
+            if not quiet:
+                self.log("  Disabling Photoshop Home Screen...")
             for ver in ("150.0", "160.0", "170.0"):
                 subprocess.run(
                     [wine, "reg", "add",
@@ -1522,7 +1866,8 @@ class PhotoshopInstallerGUI(QMainWindow):
                     env=env, capture_output=True, timeout=15,
                 )
 
-            self.log_ok("All stability fixes applied.")
+            if not quiet:
+                self.log_ok("All stability fixes applied.")
         except Exception as e:
             self.log_err(f"Fix error: {e}")
 
@@ -1603,7 +1948,8 @@ class PhotoshopInstallerGUI(QMainWindow):
         if not wine:
             return
         env = self._wine_env()
-        
+        wine_sync(env)
+
         colors = {
             "ActiveBorder": "49 54 58",
             "ActiveTitle": "49 54 58",
@@ -1631,16 +1977,49 @@ class PhotoshopInstallerGUI(QMainWindow):
             "WindowFrame": "49 54 58",
             "WindowText": "219 220 222",
         }
-        
+
+        reg_lines = [
+            "Windows Registry Editor Version 5.00",
+            "",
+            "[HKEY_CURRENT_USER\\Control Panel\\Colors]",
+        ]
+        for key, val in colors.items():
+            reg_lines.append(f'"{key}"="{val}"')
+        reg_body = "\r\n".join(reg_lines) + "\r\n"
+
+        reg_path = None
         try:
-            for key, val in colors.items():
-                subprocess.run(
-                    [wine, "reg", "add", r"HKCU\Control Panel\Colors", "/v", key, "/t", "REG_SZ", "/d", val, "/f"],
-                    env=env, capture_output=True, timeout=5
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".reg", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(reg_body)
+                reg_path = f.name
+
+            result = subprocess.run(
+                [wine, "regedit", "/S", reg_path],
+                env=env, capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode != 0:
+                err = (result.stderr or result.stdout or "").strip()
+                self.log_err(
+                    f"Dark Mode regedit failed (exit {result.returncode})"
+                    + (f": {err[:200]}" if err else "")
                 )
+                return
             self.log_ok("Wine Dark Mode applied successfully!")
+        except subprocess.TimeoutExpired:
+            self.log_err(
+                "Dark Mode timed out (Wine busy). "
+                "You can retry with the 'Apply Premium Dark Mode' button later."
+            )
         except Exception as e:
             self.log_err(f"Failed to apply Dark Mode: {e}")
+        finally:
+            if reg_path:
+                try:
+                    os.unlink(reg_path)
+                except OSError:
+                    pass
 
     # ── Full Environment Reset ────────────────────────────────────────
 
@@ -1829,9 +2208,26 @@ class PhotoshopInstallerGUI(QMainWindow):
         )
         if path:
             try:
-                with open(path, "w") as f:
-                    f.write(self.log_output.toPlainText())
+                body = self.log_output.toPlainText()
+                hints = analyze_wine_log(body)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(body)
+                    if hints:
+                        f.write("\n\n--- Diagnose-Hinweise ---\n")
+                        for h in hints:
+                            f.write(f"• {h}\n")
                 self.log_ok(f"Log saved: {path}")
+                if hints:
+                    hint_html = "<br>".join(f"• {h}" for h in hints)
+                    self.log("<b>Log-Analyse:</b><br>" + hint_html)
+                    box = QMessageBox(self)
+                    box.setWindowTitle("Log-Analyse")
+                    box.setIcon(QMessageBox.Icon.Information)
+                    box.setTextFormat(Qt.TextFormat.RichText)
+                    box.setText(
+                        "<b>Mögliche Ursachen im Log erkannt:</b><br><br>" + hint_html
+                    )
+                    box.exec()
             except Exception as e:
                 self.log_err(f"Failed to save log: {e}")
 
@@ -1849,7 +2245,8 @@ class PhotoshopInstallerGUI(QMainWindow):
             "<p><b>Maintenance:</b></p>"
             "<ul>"
             "<li><i>Switch GPU Backend</i> – Vulkan (faster) or OpenGL (more compatible)</li>"
-            "<li><i>Stability Fixes</i> – DLL overrides and registry tweaks</li>"
+            "<li><i>Adobe Runtime Fixes</i> – GrowthSDK, symlinks, dxvk.conf</li>"
+            "<li><i>Stability Fixes</i> – DLL overrides, Home Screen off</li>"
             "<li><i>Deep Repair</i> – Removes Adobe caches if login is stuck</li>"
             "<li><i>Delete Prefix</i> – Full reset (caution: all data lost)</li>"
             "</ul>"
@@ -1891,10 +2288,10 @@ def direct_launch():
         print(f"Prefix: {prefix}")
         sys.exit(1)
 
+    apply_adobe_runtime_fixes(prefix)
     ps = str(candidates[0])
     print(f"Launching: {ps}")
-    env = os.environ.copy()
-    env["WINEPREFIX"] = str(prefix)
+    env = make_wine_env()
     os.execvpe(wine, [wine, ps], env)
 
 

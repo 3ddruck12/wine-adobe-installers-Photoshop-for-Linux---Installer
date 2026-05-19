@@ -1,5 +1,19 @@
 # Changelog – Photoshop AppImage
 
+## v3.11.3-alpha (2026-05-18)
+
+### ✨ Features
+- **Adobe runtime fixes:** `apply_adobe_runtime_fixes()` — GrowthSDK disable, lowercase DLL symlinks, `dxvk.conf` + `DXVK_CONFIG_FILE` at launch; GUI buttons and auto-run after setup/install/launch.
+- **Log analyzer:** „Save Installation Log“ erkennt bekannte Wine-Fehlermuster (mfplat, GrowthSDK, Stub-DLLs, D2D) und zeigt Hinweise.
+- **CC network tweak:** `ActiveDnsProbeHost` → `www.adobe.com` (Creative Cloud).
+
+### 🐛 Bugfixes
+- **Dark Mode:** ein `regedit /S` statt vieler `wine reg`-Aufrufe; `wineserver -w` vor Registry-Schreibzugriffen (kein 5s-Timeout mehr direkt nach Setup).
+
+### 🔧 Maintenance
+- Nach Installer-Ende automatisch Runtime- + Stability-Fixes (Homescreen aus).
+- README Troubleshooting: CachyOS/fuse2, weißer Homescreen, Dark Mode.
+
 ## v3.11.2-alpha (2026-05-18)
 
 ### 🐛 Bugfixes

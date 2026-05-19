@@ -120,29 +120,64 @@ See the [LICENSE](LICENSE) file for more details.
 
 ## 🐛 Troubleshooting
 
-### AppImage does nothing when double-clicked (Ubuntu 22.04+)
+### AppImage does nothing when double-clicked (Ubuntu / Arch / CachyOS)
 
-Ubuntu 22.04+ removed `libfuse2` by default. Install it:
+Many distributions need **FUSE2** for type-2 AppImages:
 
 ```bash
-sudo apt update && sudo apt install libfuse2
+# Debian/Ubuntu
+sudo apt install libfuse2
+
+# Arch / CachyOS / Manjaro
+sudo pacman -S fuse2
 ```
 
-### "Permission denied" error
+Then:
 
 ```bash
 chmod +x Photoshop_Installer_x86_64.AppImage
+./Photoshop_Installer_x86_64.AppImage
 ```
+
+**Workaround without FUSE:**
+
+```bash
+./Photoshop_Installer_x86_64.AppImage --appimage-extract-and-run
+```
+
+### White bars / broken area on the Photoshop home screen
+
+The start screen uses embedded WebView (not classic Photoshop UI).
+
+1. **File → Open** a `.jpg` or `.psd` — if the canvas looks fine, only the home screen is affected.
+2. In the installer: **Apply Adobe Runtime Fixes** (dxvk.conf) and **Apply Photoshop Stability Fixes** (disables home screen).
+3. **Configure DPI Scaling** — try 96 (100%) or match your monitor (e.g. 144 for 150%).
+4. **Switch GPU Backend** → try **OpenGL** if Vulkan shows glitches.
+5. On **Wayland** (KDE): test an **X11** session or `export GDK_BACKEND=x11` before launch.
+
+### Dark Mode failed during setup
+
+Harmless — setup continues. Click **Apply Premium Dark Mode** again after setup finishes.
 
 ### Photoshop crashes on startup
 
-1. Click **"Apply Photoshop Stability Fixes"** in the Maintenance section.
-2. Try switching the GPU backend to **OpenGL** if Vulkan causes issues.
-3. Use **"Deep Repair"** to clear cached data.
+1. **Apply Adobe Runtime Fixes** and **Apply Photoshop Stability Fixes**.
+2. Switch GPU backend to **OpenGL** if Vulkan causes issues.
+3. Use **Deep Repair** to clear cached data.
+4. **Save Installation Log** — the GUI suggests fixes for known Wine error patterns.
 
 ### Installer dropdowns are empty / XML errors
 
-This was a known issue with older Wine versions (≤ 10.0). Wine 11.9 includes native `inproc_sync` which resolves these synchronization issues. Make sure you're using the bundled Wine, not an older system version.
+This was a known issue with older Wine versions (≤ 10.0). Wine 11.9 includes native `inproc_sync` which resolves these synchronization issues. Make sure you're using the bundled Wine from this AppImage (v3.11+), not an older system Wine.
+
+### Content-Aware / Remove Tool crashes
+
+Wine log shows `MFCreateSampleCopierMFT` / `mfplat.dll` → see [NEXT_STEPS.md](NEXT_STEPS.md) (mfplat patch, future AppImage).
+
+### Known limitations
+
+- **Neural Filters (Sensei)** — experimental; needs vkd3d-proton and often unstable under Wine.
+- **Creative Cloud login** — may require WebView2 (included in One-Click Setup) and network tweaks.
 
 ---
 
