@@ -5,7 +5,7 @@
 A modern, portable AppImage that installs and runs **Adobe Photoshop** on Linux.  
 Wine 11.9 is **pre-compiled and bundled** — no build tools needed on the user's system.
 
-Inspired by the [Affinity on Linux](https://github.com/ryzendew/Linux-Affinity-Installer)project.
+Inspired by the [Affinity on Linux](https://github.com/ryzendew/Linux-Affinity-Installer) project and the community work on [Photoshop-CC2022-Linux](https://github.com/LinSoftWin/Photoshop-CC2022-Linux) (LinSoftWin).
 
 ---
 
@@ -25,7 +25,8 @@ This project is developed and maintained in my free time. If you find it useful,
 - **Smart Wine detection** — Automatically uses the bundled Wine; falls back to a local dev build or system Wine.
 - **Auto distro detection** — Installs the right packages on Debian, Arch, Fedora, and openSUSE.
 - **Maintenance tools** — `winecfg`, Vulkan/OpenGL toggle, stability fixes, cache repair, prefix reset.
-- **Desktop integration** — "Add to Start Menu" creates a `.desktop` entry so Photoshop appears in your application launcher.
+- **Desktop integration** — Start menu entry with **PSD file association**, `StartupWMClass` for correct taskbar grouping, and `--launch %F` to open files from the file manager.
+- **Camera Raw (optional)** — One-click download and install of Adobe Camera Raw into the Wine prefix.
 
 ## 📋 Supported Software
 
@@ -173,6 +174,25 @@ This was a known issue with older Wine versions (≤ 10.0). Wine 11.9 includes n
 ### Content-Aware / Remove Tool crashes
 
 Wine log shows `MFCreateSampleCopierMFT` / `mfplat.dll` → see [NEXT_STEPS.md](NEXT_STEPS.md) (mfplat patch, future AppImage).
+
+### Status shows „Photoshop: not installed“ after setup
+
+Click **Refresh Status** in the dashboard. The app searches `Program Files`, `Program Files (x86)`, and other Adobe paths. If the Adobe installer exits with an error code but Photoshop was installed anyway, the GUI now detects `Photoshop.exe` automatically.
+
+### Uninstall Photoshop
+
+Use **Uninstall Photoshop** in the installer panel to remove the Photoshop folder from the Wine prefix and delete launcher entries. **Remove Start Menu Entries** only removes `.desktop` shortcuts without deleting Photoshop files.
+
+### Open `.psd` files from the file manager
+
+1. Run **Add to Start Menu** (registers PSD as default handler when `xdg-mime` is available).
+2. Double-click a `.psd` or use **Open With → Adobe Photoshop**.
+
+From the terminal: `./Photoshop_Installer_x86_64.AppImage --launch /path/to/file.psd`
+
+### Camera Raw (optional)
+
+Use **Install Camera Raw** in the installer panel, then in Photoshop: **Edit → Preferences → Camera Raw → Performance** — turn off **Use Graphics Processor**. If Camera Raw is grayed out, disable tooltips under **Edit → Preferences → Tools**.
 
 ### Known limitations
 

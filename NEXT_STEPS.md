@@ -246,8 +246,7 @@ Bei Photoshop-Exit mit Rückgabecode ≠ 0 automatisch fragen:
 
 ## 7. Nice-to-have
 
-- **`.psd`-Mimetype-Association** beim Add-to-Start-Menu mit anlegen, damit
-  `xdg-open file.psd` direkt Photoshop öffnet.
+- ~~**`.psd`-Mimetype-Association**~~ — erledigt in v3.11.4 (`photoshop-app.desktop`, `--launch %F`, `xdg-mime`).
 - **Update-Check:** Beim Start nach neuer AppImage-Version suchen
   (GitHub Releases API), nicht zwangsweise auto-installieren.
 - **Backup vor riskanten Aktionen:** Vor `Full Reset` automatisch

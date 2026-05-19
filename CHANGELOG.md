@@ -1,5 +1,17 @@
 # Changelog – Photoshop AppImage
 
+## v3.11.4-alpha (2026-05-19)
+
+### ✨ Features
+- **Desktop / PSD:** Startmenü-Eintrag mit `MimeType` (PSD), `StartupWMClass=photoshop.exe`, `Exec=… --launch %F`; `xdg-mime` Registrierung; Datei-Öffnen per Doppelklick.
+- **Launch:** `winepath`-Konvertierung für Dokumente; `--launch /path/file.psd`; GUI „Launch Photoshop with File…“.
+- **One-Click Setup:** Baseline-Winetricks `win10`, `fontsmooth=rgb`, `dxvk` (wie LinSoftWin).
+- **DXVK:** `DXVK_LOG_PATH` und `DXVK_STATE_CACHE_PATH` auf den Wine-Prefix gesetzt.
+- **Camera Raw:** optionaler Download/Installer-Button (Adobe Camera Raw 12.2.1).
+
+### 🐛 Bugfixes
+- Install-Erkennung (`Program Files (x86)`), Deinstall + Startmenü-Entfernung inkl. Legacy-Icons.
+
 ## v3.11.3-alpha (2026-05-18)
 
 ### ✨ Features

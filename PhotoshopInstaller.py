@@ -27,6 +27,7 @@ import threading
 import json
 import re
 import tempfile
+import urllib.request
 from pathlib import Path
 import time
 
@@ -98,6 +99,17 @@ DXVK_CONF_TEMPLATE = (
 
 ADOBE_BINARY_SUFFIXES = {".dll", ".exe", ".ocx", ".api"}
 
+# Winetricks applied before version-specific components (LinSoftWin-style baseline)
+WINETRICKS_BASELINE = ("win10", "fontsmooth=rgb", "dxvk")
+
+CAMERA_RAW_INSTALLER_URL = (
+    "https://download.adobe.com/pub/adobe/photoshop/cameraraw/win/12.x/"
+    "CameraRaw_12_2_1.exe"
+)
+
+PSD_MIME_TYPES = "image/psd;image/x-psd;image/vnd.adobe.photoshop;"
+PHOTOSHOP_STARTUP_WM_CLASS = "photoshop.exe"
+
 # Known Wine log patterns → user-facing hints (NEXT_STEPS.md §4.2)
 WINE_LOG_HINTS = [
     (
@@ -127,10 +139,145 @@ def get_dxvk_conf_path(prefix_path=None):
     return Path(prefix_path or get_prefix_path()) / "dxvk.conf"
 
 
+def merge_winetricks_components(version_components):
+    """Baseline winetricks + version config, deduplicated, order preserved."""
+    seen = set()
+    merged = []
+    for name in (*WINETRICKS_BASELINE, *(version_components or [])):
+        if name not in seen:
+            seen.add(name)
+            merged.append(name)
+    return merged
+
+
+def _quote_desktop_path(path):
+    if any(c in path for c in " \t\n\"'\\"):
+        return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return path
+
+
+def format_photoshop_launch_exec(include_file_arg=True):
+    """Desktop Entry Exec line for AppImage or source launch."""
+    appimage = os.environ.get("APPIMAGE")
+    if appimage:
+        base = f"{_quote_desktop_path(appimage)} --launch"
+    else:
+        script = os.path.abspath(__file__)
+        base = f"{_quote_desktop_path(sys.executable)} {_quote_desktop_path(script)} --launch"
+    if include_file_arg:
+        base += " %F"
+    return base
+
+
+def build_photoshop_desktop_entry(exec_line, icon_path):
+    """Freedesktop entry with PSD association and correct taskbar grouping."""
+    return (
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Adobe Photoshop\n"
+        "Comment=Image editing via Wine\n"
+        f"Exec={exec_line}\n"
+        f"Icon={icon_path}\n"
+        "Terminal=false\n"
+        "Categories=Graphics;Photography;\n"
+        f"MimeType={PSD_MIME_TYPES}\n"
+        f"StartupWMClass={PHOTOSHOP_STARTUP_WM_CLASS}\n"
+    )
+
+
+def winepath_to_windows(wine, env, unix_path):
+    """Convert a Linux path to a Windows path for Photoshop's command line."""
+    if not unix_path:
+        return None
+    path = os.path.abspath(os.path.expanduser(unix_path))
+    if not os.path.exists(path):
+        return None
+    try:
+        result = subprocess.run(
+            [wine, "winepath", "-w", path],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+        if result.returncode == 0:
+            win_path = result.stdout.strip()
+            if win_path:
+                return win_path
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+def build_photoshop_launch_command(wine, ps_exe, env, file_paths=None):
+    """argv for wine Photoshop.exe [optional document paths in Windows form]."""
+    cmd = [wine, ps_exe]
+    if file_paths:
+        for unix_path in file_paths:
+            win_path = winepath_to_windows(wine, env, unix_path)
+            if win_path:
+                cmd.append(win_path)
+    return cmd
+
+
+def launch_photoshop_process(wine, ps_exe, env=None, file_paths=None):
+    """Start Photoshop (optionally opening one or more files)."""
+    env = env or make_wine_env()
+    cmd = build_photoshop_launch_command(wine, ps_exe, env, file_paths)
+    subprocess.Popen(
+        cmd,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def register_psd_file_association(app_dir):
+    """Register photoshop-app.desktop as default handler for PSD MIME types (best effort)."""
+    desktop_id = "photoshop-app.desktop"
+    for mime in ("image/psd", "image/x-psd", "image/vnd.adobe.photoshop"):
+        if shutil.which("xdg-mime"):
+            try:
+                subprocess.run(
+                    ["xdg-mime", "default", desktop_id, mime],
+                    capture_output=True,
+                    timeout=10,
+                )
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+    if shutil.which("update-desktop-database"):
+        try:
+            subprocess.run(
+                ["update-desktop-database", str(app_dir)],
+                capture_output=True,
+                timeout=15,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+
+def collect_launch_file_args(argv=None):
+    """Paths passed after ``--launch`` on the command line."""
+    argv = argv if argv is not None else sys.argv
+    if "--launch" not in argv:
+        return []
+    idx = argv.index("--launch")
+    files = []
+    for arg in argv[idx + 1 :]:
+        if arg.startswith("-"):
+            continue
+        if os.path.isfile(arg) or os.path.isdir(arg):
+            files.append(arg)
+    return files
+
+
 def make_wine_env():
     """Wine environment for subprocess / Popen (bundled DLLs + dxvk.conf)."""
     env = os.environ.copy()
-    env["WINEPREFIX"] = get_prefix_path()
+    prefix = get_prefix_path()
+    env["WINEPREFIX"] = prefix
     wine = get_wine_binary()
     if wine:
         env["WINE"] = wine
@@ -153,24 +300,110 @@ def make_wine_env():
         if extra:
             env["WINEDLLPATH"] = extra + ":" + env.get("WINEDLLPATH", "")
 
-    dxvk_conf = get_dxvk_conf_path()
+    prefix_path = Path(prefix)
+    env["DXVK_LOG_PATH"] = str(prefix_path)
+    env["DXVK_STATE_CACHE_PATH"] = str(prefix_path)
+
+    dxvk_conf = get_dxvk_conf_path(prefix)
     if dxvk_conf.is_file():
         env["DXVK_CONFIG_FILE"] = str(dxvk_conf.resolve())
 
     return env
 
 
+def _adobe_program_roots(prefix):
+    """Program Files locations where Adobe may install Photoshop."""
+    drive = prefix / "drive_c"
+    for name in ("Program Files", "Program Files (x86)"):
+        adobe = drive / name / "Adobe"
+        if adobe.is_dir():
+            yield adobe
+
+
 def find_photoshop_install_dirs(prefix_path=None):
     """Return installed Photoshop directories under the Wine prefix."""
     prefix = Path(prefix_path or get_prefix_path())
-    adobe = prefix / "drive_c" / "Program Files" / "Adobe"
-    if not adobe.is_dir():
-        return []
-    return sorted(
-        (p for p in adobe.glob("Adobe Photoshop*") if p.is_dir()),
-        key=lambda p: p.name,
-        reverse=True,
-    )
+    dirs = []
+    seen = set()
+    for adobe in _adobe_program_roots(prefix):
+        for p in adobe.glob("Adobe Photoshop*"):
+            if p.is_dir():
+                key = p.resolve()
+                if key not in seen:
+                    seen.add(key)
+                    dirs.append(p)
+    return sorted(dirs, key=lambda p: p.name, reverse=True)
+
+
+def find_photoshop_exe(prefix_path=None):
+    """
+    Locate Photoshop.exe in the Wine prefix.
+    Checks Program Files, Program Files (x86), and falls back to drive_c search.
+    """
+    prefix = Path(prefix_path or get_prefix_path())
+    candidates = []
+
+    for ps_dir in find_photoshop_install_dirs(prefix):
+        exe = ps_dir / "Photoshop.exe"
+        if exe.is_file():
+            candidates.append(exe)
+
+    for adobe in _adobe_program_roots(prefix):
+        for exe in adobe.rglob("Photoshop.exe"):
+            if exe.is_file():
+                candidates.append(exe)
+
+    drive = prefix / "drive_c"
+    if not candidates and drive.is_dir():
+        for exe in drive.rglob("Photoshop.exe"):
+            if exe.is_file() and "Adobe" in exe.as_posix():
+                candidates.append(exe)
+
+    if not candidates:
+        return None
+
+    unique = sorted({c.resolve() for c in candidates}, key=lambda p: str(p).lower(), reverse=True)
+    return str(unique[0])
+
+
+START_MENU_DESKTOP_FILES = (
+    "photoshop-installer.desktop",
+    "photoshop-app.desktop",
+)
+
+
+def remove_start_menu_entries():
+    """Remove .desktop launcher files and menu icons created by this app."""
+    app_dir = Path.home() / ".local" / "share" / "applications"
+    icon_dir = Path.home() / ".local" / "share" / "icons"
+    removed = []
+    for name in START_MENU_DESKTOP_FILES:
+        path = app_dir / name
+        if path.is_file():
+            path.unlink()
+            removed.append(name)
+    # This app + legacy LinSoftWin installer icon names
+    for icon_name in ("photoshop-linux.png", "photoshop.png"):
+        icon_path = icon_dir / icon_name
+        if icon_path.is_file():
+            icon_path.unlink()
+            removed.append(f"icons/{icon_name}")
+    return removed
+
+
+def uninstall_photoshop_from_prefix(prefix_path=None):
+    """
+    Remove Photoshop install folders from the prefix and start menu entries.
+    Returns dict with removed_dirs (list of str) and menu_files (list).
+    """
+    prefix = Path(prefix_path or get_prefix_path())
+    removed_dirs = []
+    for ps_dir in find_photoshop_install_dirs(prefix):
+        shutil.rmtree(ps_dir, ignore_errors=False)
+        removed_dirs.append(str(ps_dir))
+
+    menu_files = remove_start_menu_entries()
+    return {"removed_dirs": removed_dirs, "menu_files": menu_files}
 
 
 def disable_adobe_growthsdk(prefix_path=None):
@@ -628,7 +861,20 @@ class InstallerRunnerThread(QThread):
                 env=env, capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
             )
-            if proc.returncode != 0:
+            ps_exe = find_photoshop_exe(self.prefix_path)
+            if ps_exe:
+                self.log_signal.emit(
+                    f"<font color='#4caf50'>Photoshop detected: {ps_exe}</font>"
+                )
+                if proc.returncode != 0:
+                    self.log_signal.emit(
+                        f"<font color='#ff9800'>Installer exit code {proc.returncode}, "
+                        "but Photoshop appears installed.</font>"
+                    )
+                else:
+                    self.log_signal.emit("Installer process finished.")
+                self.finished_signal.emit(True)
+            elif proc.returncode != 0:
                 self.log_signal.emit(f"Installer exited with code {proc.returncode}")
                 if proc.stderr:
                     self.log_signal.emit(proc.stderr[:1000])
@@ -643,11 +889,68 @@ class InstallerRunnerThread(QThread):
                         )
                 self.finished_signal.emit(False)
             else:
-                self.log_signal.emit("Installer process finished.")
-                self.finished_signal.emit(True)
+                self.log_signal.emit(
+                    "<font color='#ff9800'>Installer finished but Photoshop.exe was not found. "
+                    "Check the install path or click Refresh Status.</font>"
+                )
+                self.finished_signal.emit(False)
         except Exception as e:
             self.log_signal.emit(f"Error running installer: {e}")
             self.finished_signal.emit(False)
+
+
+class CameraRawInstallThread(QThread):
+    """Download and run the Adobe Camera Raw installer in the Wine prefix."""
+    log_signal = pyqtSignal(str)
+    finished_signal = pyqtSignal(bool)
+
+    def run(self):
+        wine = get_wine_binary()
+        if not wine:
+            self.log_signal.emit("Wine binary not found.")
+            self.finished_signal.emit(False)
+            return
+        if not find_photoshop_exe():
+            self.log_signal.emit(
+                "Install Photoshop first, then run the Camera Raw installer."
+            )
+            self.finished_signal.emit(False)
+            return
+
+        env = make_wine_env()
+        dest = Path(tempfile.gettempdir()) / "CameraRaw_12_2_1.exe"
+        try:
+            self.log_signal.emit(f"Downloading Camera Raw from Adobe...")
+            urllib.request.urlretrieve(CAMERA_RAW_INSTALLER_URL, dest)
+            self.log_signal.emit(f"Running {dest.name} (follow the setup wizard)...")
+            proc = subprocess.run(
+                [wine, str(dest)],
+                env=env,
+                timeout=600,
+            )
+            if proc.returncode == 0:
+                self.log_signal.emit(
+                    "<font color='#4caf50'>Camera Raw installer finished.</font>"
+                )
+                self.log_signal.emit(
+                    "Tip: In Photoshop → Camera Raw → Performance, turn off "
+                    "'Use Graphics Processor'. Disable tooltips under Edit → Preferences → Tools "
+                    "if Camera Raw stays grayed out."
+                )
+                self.finished_signal.emit(True)
+            else:
+                self.log_signal.emit(
+                    f"Camera Raw installer exited with code {proc.returncode}."
+                )
+                self.finished_signal.emit(False)
+        except Exception as e:
+            self.log_signal.emit(f"Camera Raw install failed: {e}")
+            self.finished_signal.emit(False)
+        finally:
+            try:
+                dest.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -847,9 +1150,37 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.launch_btn.clicked.connect(self.launch_photoshop)
         ia_l.addWidget(self.launch_btn)
 
+        btn_open_file = QPushButton("Launch Photoshop with File…")
+        btn_open_file.setToolTip("Open a .psd or other image in Photoshop")
+        btn_open_file.clicked.connect(self.launch_photoshop_with_file)
+        ia_l.addWidget(btn_open_file)
+
+        self.camera_raw_btn = QPushButton("Install Camera Raw (optional)")
+        self.camera_raw_btn.setToolTip(
+            "Downloads Adobe Camera Raw 12.2.1 into the Wine prefix. "
+            "After install: disable GPU in Camera Raw performance settings."
+        )
+        self.camera_raw_btn.clicked.connect(self.install_camera_raw)
+        ia_l.addWidget(self.camera_raw_btn)
+
         self.menu_entry_btn = QPushButton("Add to Start Menu")
         self.menu_entry_btn.clicked.connect(self.add_to_start_menu)
         ia_l.addWidget(self.menu_entry_btn)
+
+        btn_remove_menu = QPushButton("Remove Start Menu Entries")
+        btn_remove_menu.setToolTip("Remove Photoshop and installer shortcuts from the app launcher")
+        btn_remove_menu.clicked.connect(self.remove_from_start_menu)
+        ia_l.addWidget(btn_remove_menu)
+
+        btn_uninstall_ps = QPushButton("Uninstall Photoshop")
+        btn_uninstall_ps.setToolTip(
+            "Delete Photoshop from the Wine prefix and remove launcher entries "
+            "(Wine prefix and Creative Cloud stay intact)"
+        )
+        btn_uninstall_ps.setObjectName("dangerBtn")
+        btn_uninstall_ps.clicked.connect(self.uninstall_photoshop)
+        ia_l.addWidget(btn_uninstall_ps)
+
         ctrl.addWidget(ia)
 
         # System Setup
@@ -1032,6 +1363,8 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.setup_btn.setEnabled(not busy)
         self.run_inst_btn.setEnabled(not busy)
         self.tricks_btn.setEnabled(not busy)
+        if hasattr(self, "camera_raw_btn"):
+            self.camera_raw_btn.setEnabled(not busy)
         if busy:
             self.progress_label.setText(label)
             self.cancel_btn.show()
@@ -1195,12 +1528,14 @@ class PhotoshopInstallerGUI(QMainWindow):
         else:
             lines.append("\U0001f377 Wine: \u274c not found")
 
-        ps = self._find_photoshop_exe()
+        ps = find_photoshop_exe()
         if ps:
-            ps_dir = os.path.basename(os.path.dirname(ps))
+            ps_dir = Path(ps).parent.name
             lines.append(f"\U0001f3a8 Photoshop: \u2705 {ps_dir}")
+            self.launch_btn.setEnabled(True)
         else:
             lines.append("\U0001f3a8 Photoshop: \u274c not installed")
+            self.launch_btn.setEnabled(False)
 
         prefix = Path(get_prefix_path())
         if prefix.exists():
@@ -1233,9 +1568,9 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.progress_bar.setValue(0)
         self.log("<b>Starting One-Click Setup...</b>")
 
-        self._setup_thread = WineSetupThread(
-            get_prefix_path(), wine, config.get("winetricks", [])
-        )
+        components = merge_winetricks_components(config.get("winetricks", []))
+        self.log(f"Winetricks: {', '.join(components)}")
+        self._setup_thread = WineSetupThread(get_prefix_path(), wine, components)
         self._setup_thread.log_signal.connect(self.log)
         self._setup_thread.progress_signal.connect(self.progress_bar.setValue)
         self._setup_thread.finished_signal.connect(self._on_setup_finished)
@@ -1287,33 +1622,28 @@ class PhotoshopInstallerGUI(QMainWindow):
 
     def _on_installer_finished(self, success):
         self._set_busy(False)
-        if success:
+        ps = find_photoshop_exe()
+        if ps:
+            if not success:
+                self.log(
+                    "<font color='#ff9800'>Installer reported an error, but Photoshop was found — "
+                    "treating install as successful.</font>"
+                )
             self.log_ok("Installer finished. Applying post-install fixes...")
             self.apply_adobe_runtime_fixes(quiet=True)
             self.apply_ps_fixes(quiet=True)
-            self.log_ok("Try 'Launch Photoshop'.")
+            self.log_ok(f"Ready to launch: {ps}")
         else:
-            self.log_err("Installer process reported an error.")
-        self._refresh_status()
-
-    # ── Launch Photoshop ──────────────────────────────────────────────
+            self.log_err(
+                "Photoshop.exe not found in prefix. "
+                "Installation may have failed or used a non-standard path."
+            )
+        QTimer.singleShot(500, self._refresh_status)
 
     def _find_photoshop_exe(self):
-        prefix = Path(get_prefix_path())
-        candidates = [
-            prefix / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2025" / "Photoshop.exe",
-            prefix / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2024" / "Photoshop.exe",
-            prefix / "drive_c" / "Program Files" / "Adobe" / "Adobe Photoshop 2021" / "Photoshop.exe",
-        ]
-        for p in candidates:
-            if p.exists():
-                return str(p)
-        # Glob fallback
-        for match in sorted(prefix.glob("drive_c/Program Files/Adobe/*/Photoshop.exe"), reverse=True):
-            return str(match)
-        return None
+        return find_photoshop_exe()
 
-    def launch_photoshop(self):
+    def launch_photoshop(self, file_paths=None):
         wine = get_wine_binary()
         if not wine:
             self.log_err("Wine binary not found!")
@@ -1330,18 +1660,61 @@ class PhotoshopInstallerGUI(QMainWindow):
         self.log("Applying Adobe runtime fixes before launch...")
         self.apply_adobe_runtime_fixes(quiet=True)
 
-        self.log(f"Launching Photoshop: {ps}")
+        if file_paths:
+            self.log(f"Launching Photoshop with: {', '.join(file_paths)}")
+        else:
+            self.log(f"Launching Photoshop: {ps}")
         env = self._wine_env()
         try:
-            subprocess.Popen(
-                [wine, ps],
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            launch_photoshop_process(wine, ps, env, file_paths)
             self.log_ok("Photoshop process started.")
         except Exception as e:
             self.log_err(f"Failed to launch: {e}")
+
+    def launch_photoshop_with_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open in Photoshop",
+            str(Path.home()),
+            "Images (*.psd *.psb *.jpg *.jpeg *.png *.tif *.tiff *.raw);;All Files (*)",
+        )
+        if path:
+            self.launch_photoshop(file_paths=[path])
+
+    def install_camera_raw(self):
+        wine = get_wine_binary()
+        if not wine:
+            self.log_err("Wine binary not found!")
+            return
+        if not Path(get_prefix_path()).exists():
+            self.log_err("Run One-Click Setup first.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Install Camera Raw",
+            "Download and run Adobe Camera Raw 12.2.1 in your Wine prefix?\n\n"
+            "Requires internet. After install, disable GPU acceleration in "
+            "Camera Raw performance settings.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._set_busy(True, "Installing Camera Raw...")
+        self._camera_raw_thread = CameraRawInstallThread()
+        self._camera_raw_thread.log_signal.connect(self.log)
+        self._camera_raw_thread.finished_signal.connect(self._on_camera_raw_finished)
+        self._active_thread = self._camera_raw_thread
+        self._camera_raw_thread.start()
+
+    def _on_camera_raw_finished(self, success):
+        self._set_busy(False)
+        if success:
+            self.log_ok("Camera Raw setup finished.")
+        else:
+            self.log_err("Camera Raw setup did not complete successfully.")
 
     # ── Start Menu ────────────────────────────────────────────────────
 
@@ -1360,12 +1733,14 @@ class PhotoshopInstallerGUI(QMainWindow):
 
             appimage = os.environ.get("APPIMAGE")
             if appimage:
-                exec_installer = appimage
-                exec_launch = f"{appimage} --launch"
+                exec_installer = _quote_desktop_path(appimage)
             else:
                 script = os.path.abspath(__file__)
-                exec_installer = f"{sys.executable} {script}"
-                exec_launch = f"{sys.executable} {script} --launch"
+                exec_installer = (
+                    f"{_quote_desktop_path(sys.executable)} "
+                    f"{_quote_desktop_path(script)}"
+                )
+            exec_launch = format_photoshop_launch_exec(include_file_arg=True)
 
             # Installer entry
             installer_desktop = app_dir / "photoshop-installer.desktop"
@@ -1386,23 +1761,100 @@ class PhotoshopInstallerGUI(QMainWindow):
             if ps:
                 launch_desktop = app_dir / "photoshop-app.desktop"
                 launch_desktop.write_text(
-                    "[Desktop Entry]\n"
-                    "Type=Application\n"
-                    "Name=Adobe Photoshop\n"
-                    "Comment=Image editing via Wine\n"
-                    f"Exec={exec_launch}\n"
-                    f"Icon={dest_icon}\n"
-                    "Terminal=false\n"
-                    "Categories=Graphics;\n"
+                    build_photoshop_desktop_entry(exec_launch, dest_icon),
+                    encoding="utf-8",
                 )
                 launch_desktop.chmod(0o644)
-                self.log_ok("Photoshop launcher added to start menu.")
+                register_psd_file_association(app_dir)
+                self.log_ok(
+                    "Photoshop launcher added with PSD file association "
+                    "(double-click .psd or use 'Open With')."
+                )
 
             self.log_ok("Installer shortcut added to start menu.")
             QMessageBox.information(self, "Done", "Start menu entries created!")
 
         except Exception as e:
             self.log_err(f"Failed to create menu entries: {e}")
+
+    def remove_from_start_menu(self):
+        """Remove launcher .desktop files from the user applications menu."""
+        removed = remove_start_menu_entries()
+        if removed:
+            self.log_ok(f"Removed start menu entries: {', '.join(removed)}")
+            QMessageBox.information(
+                self, "Start Menu",
+                "Removed:\n• " + "\n• ".join(removed),
+            )
+        else:
+            self.log("No Photoshop launcher entries found in the start menu.")
+            QMessageBox.information(
+                self, "Start Menu",
+                "No entries found (~/.local/share/applications/photoshop-*.desktop).",
+            )
+
+    def uninstall_photoshop(self):
+        """Remove Photoshop installation folders and start menu shortcuts."""
+        ps = find_photoshop_exe()
+        if not ps:
+            reply = QMessageBox.question(
+                self,
+                "Uninstall Photoshop",
+                "Photoshop was not detected in the Wine prefix.\n\n"
+                "Remove start menu entries anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            removed = remove_start_menu_entries()
+            if removed:
+                self.log_ok(f"Removed menu entries: {', '.join(removed)}")
+            self._refresh_status()
+            return
+
+        ps_dir = Path(ps).parent
+        reply = QMessageBox.warning(
+            self,
+            "Uninstall Photoshop",
+            f"This will permanently delete:\n\n"
+            f"  {ps_dir}\n\n"
+            "and remove start menu shortcuts.\n\n"
+            "Wine prefix, Creative Cloud, and other Adobe apps are kept.\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.log("<b>Uninstalling Photoshop...</b>")
+        self._kill_all_wine_processes()
+
+        try:
+            result = uninstall_photoshop_from_prefix()
+            for d in result["removed_dirs"]:
+                self.log_ok(f"  Removed: {d}")
+            for f in result["menu_files"]:
+                self.log_ok(f"  Start menu: removed {f}")
+            if not result["removed_dirs"] and not result["menu_files"]:
+                self.log("Nothing to remove.")
+            else:
+                self.log_ok("Photoshop uninstalled from Wine prefix.")
+            QMessageBox.information(
+                self, "Uninstall Complete",
+                "Photoshop has been removed from the Wine prefix.\n"
+                "Start menu entries were removed if present.",
+            )
+        except Exception as e:
+            self.log_err(f"Uninstall failed: {e}")
+            QMessageBox.critical(
+                self, "Uninstall Failed",
+                f"Could not remove all files:\n{e}\n\n"
+                "Try 'Full Environment Reset' if the folder is locked.",
+            )
+
+        self._refresh_status()
 
     # ── System Packages ───────────────────────────────────────────────
 
@@ -1463,9 +1915,8 @@ class PhotoshopInstallerGUI(QMainWindow):
 
         self._set_busy(True, "Installing winetricks components...")
         self.progress_bar.setValue(0)
-        self._wt_thread = WineSetupThread(
-            get_prefix_path(), wine, config.get("winetricks", [])
-        )
+        components = merge_winetricks_components(config.get("winetricks", []))
+        self._wt_thread = WineSetupThread(get_prefix_path(), wine, components)
         self._wt_thread.log_signal.connect(self.log)
         self._wt_thread.progress_signal.connect(self.progress_bar.setValue)
         self._wt_thread.finished_signal.connect(self._on_setup_finished)
@@ -2275,24 +2726,28 @@ class PhotoshopInstallerGUI(QMainWindow):
 # ---------------------------------------------------------------------------
 
 def direct_launch():
-    """Launch Photoshop without showing the GUI."""
+    """Launch Photoshop without showing the GUI (optional files after --launch)."""
     wine = get_wine_binary()
     if not wine:
         print("ERROR: Wine binary not found.")
         sys.exit(1)
 
     prefix = Path(get_prefix_path())
-    candidates = sorted(prefix.glob("drive_c/Program Files/Adobe/*/Photoshop.exe"), reverse=True)
-    if not candidates:
+    ps = find_photoshop_exe(prefix)
+    if not ps:
         print("ERROR: Photoshop.exe not found in prefix.")
         print(f"Prefix: {prefix}")
         sys.exit(1)
 
-    apply_adobe_runtime_fixes(prefix)
-    ps = str(candidates[0])
-    print(f"Launching: {ps}")
+    file_paths = collect_launch_file_args()
     env = make_wine_env()
-    os.execvpe(wine, [wine, ps], env)
+    if file_paths:
+        print(f"Launching: {ps} with {len(file_paths)} file(s)")
+    else:
+        print(f"Launching: {ps}")
+    apply_adobe_runtime_fixes(prefix)
+    cmd = build_photoshop_launch_command(wine, ps, env, file_paths or None)
+    os.execvpe(cmd[0], cmd, env)
 
 
 # ---------------------------------------------------------------------------
